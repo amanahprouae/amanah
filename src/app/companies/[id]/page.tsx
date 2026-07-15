@@ -1820,11 +1820,44 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
                   className="w-full px-4 py-2 border border-border-subtle rounded-lg text-sm bg-white"
                 >
                   <option value="">Select category...</option>
-                  {categories?.filter((cat) => cat.type === 'company' || !cat.type).map((cat) => (
-                    <option key={cat.id} value={cat.id}>
-                      {cat.name}
-                    </option>
-                  ))}
+                  {(() => {
+                    const companyCats = categories?.filter(
+                      (cat) =>
+                        (cat.type === 'company' || !cat.type) &&
+                        !partnerDocumentKeywords.some((keyword) =>
+                          (cat.name + ' ' + (cat.code || '')).toLowerCase().includes(keyword)
+                        )
+                    );
+                    const partnerCats = categories?.filter(
+                      (cat) =>
+                        (cat.type === 'company' || !cat.type) &&
+                        partnerDocumentKeywords.some((keyword) =>
+                          (cat.name + ' ' + (cat.code || '')).toLowerCase().includes(keyword)
+                        )
+                    );
+                    return (
+                      <>
+                        {companyCats && companyCats.length > 0 && (
+                          <optgroup label="Company Documents">
+                            {companyCats.map((cat) => (
+                              <option key={cat.id} value={cat.id}>
+                                {cat.name}
+                              </option>
+                            ))}
+                          </optgroup>
+                        )}
+                        {partnerCats && partnerCats.length > 0 && (
+                          <optgroup label="Partner Documents">
+                            {partnerCats.map((cat) => (
+                              <option key={cat.id} value={cat.id}>
+                                {cat.name}
+                              </option>
+                            ))}
+                          </optgroup>
+                        )}
+                      </>
+                    );
+                  })()}
                 </select>
               </div>
 
