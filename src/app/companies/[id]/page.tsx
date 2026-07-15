@@ -8,6 +8,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as zod from 'zod';
 import { useAuth } from '@/components/providers';
+import { compressFile } from '@/utils/compressFile';
 
 const employeeSchema = zod.object({
   first_name: zod.string().min(2, { message: 'First name is required' }),
@@ -727,6 +728,16 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
 
       const fileName = uploadFileName || selectedFile.name;
       const cleanFileName = fileName.replace(/[^a-zA-Z0-9_.-]/g, '_');
+      
+      // Compress file before uploading
+      let finalFileToUpload = selectedFile;
+      try {
+        finalFileToUpload = await compressFile(selectedFile);
+      } catch (e) {
+        console.error('File compression failed, using original', e);
+      }
+      const fileSize = finalFileToUpload.size;
+
       // If uploading a relative document for an individual entity, store under employee_documents and the 'employee-docs' bucket
       if (company?.entity_type === 'individual' && uploadMainCategory === 'relative') {
         if (!uploadRelativeEmployeeId) {
@@ -739,7 +750,7 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
 
         const { error: storageError } = await supabase.storage
           .from('employee-docs')
-          .upload(filePathEmp, selectedFile, {
+          .upload(filePathEmp, finalFileToUpload, {
             cacheControl: '3600',
             upsert: false,
           });
@@ -752,7 +763,7 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
             category_id: finalCategoryId,
             file_name: fileName,
             file_path: filePathEmp,
-            size_bytes: selectedFile.size,
+            size_bytes: fileSize,
             issue_date: uploadIssue || null,
             expiry_date: uploadExpiry || null,
             status: 'active',
@@ -770,7 +781,7 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
         // 1. Upload to Supabase Storage Bucket 'company-docs'
         const { error: storageError } = await supabase.storage
           .from('company-docs')
-          .upload(filePath, selectedFile, {
+          .upload(filePath, finalFileToUpload, {
             cacheControl: '3600',
             upsert: false,
           });
@@ -784,7 +795,7 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
             category_id: finalCategoryId,
             file_name: fileName,
             file_path: filePath,
-            size_bytes: selectedFile.size,
+            size_bytes: fileSize,
             issue_date: uploadIssue || null,
             expiry_date: uploadExpiry || null,
             status: 'active',
@@ -930,10 +941,19 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
       const cleanFileName = fileName.replace(/[^a-zA-Z0-9_.-]/g, '_');
       const filePath = `${managedEmployee.id}/${Date.now()}_${cleanFileName}`;
 
+      // Compress file before uploading
+      let finalFileToUpload = empDocFile;
+      try {
+        finalFileToUpload = await compressFile(empDocFile);
+      } catch (e) {
+        console.error('File compression failed, using original', e);
+      }
+      const fileSize = finalFileToUpload.size;
+
       // 1. Upload to Supabase Storage Bucket 'employee-docs'
       const { error: storageError } = await supabase.storage
         .from('employee-docs')
-        .upload(filePath, empDocFile, {
+        .upload(filePath, finalFileToUpload, {
           cacheControl: '3600',
           upsert: false,
         });
@@ -947,7 +967,7 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
           category_id: finalCategoryId,
           file_name: fileName,
           file_path: filePath,
-          size_bytes: empDocFile.size,
+          size_bytes: fileSize,
           issue_date: empDocIssue || null,
           expiry_date: empDocExpiry || null,
           status: 'active',
@@ -2121,7 +2141,7 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
                   disabled={isUploading}
                   className="px-lg py-2 bg-primary text-white rounded-lg text-body-sm font-semibold hover:brightness-110 disabled:bg-primary/50 transition-all"
                 >
-                  {isUploading ? 'Uploading...' : 'Upload Document'}
+                  {isUploading ? 'Compressing & Uploading...' : 'Upload Document'}
                 </button>
               </div>
             </form>
@@ -2234,7 +2254,7 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
                     disabled={isUploadingEmpDoc}
                     className="w-full py-2 bg-primary text-white rounded-lg text-xs font-semibold hover:brightness-110 disabled:bg-primary/50 transition-all cursor-pointer"
                   >
-                    {isUploadingEmpDoc ? 'Uploading...' : 'Upload Document'}
+                    {isUploadingEmpDoc ? 'Compressing & Uploading...' : 'Upload Document'}
                   </button>
                 </form>
               </div>
