@@ -292,7 +292,15 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
     setEditDocName(doc.file_name);
     setEditDocIssue(doc.issue_date || '');
     setEditDocExpiry(doc.expiry_date || '');
-    setEditDocCategory(doc.category_id || '');
+    
+    // Check if category is partner/sponsor category
+    const isPartner = doc.document_categories ? partnerDocumentKeywords.some((keyword) =>
+      (doc.document_categories.name + ' ' + (doc.document_categories.code || '')).toLowerCase().includes(keyword)
+    ) : false;
+    
+    setEditMainCategory(isPartner ? 'partner' : 'company');
+    setEditSubCategory(doc.category_id || '');
+    setEditCustomCategoryName('');
     setIsEditDocModalOpen(true);
   };
 
@@ -590,8 +598,14 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
     },
   });
 
-  // Document Upload State
-  const [uploadCategory, setUploadCategory] = useState('');
+  // Document Upload & Category States
+  const [uploadMainCategory, setUploadMainCategory] = useState<'company' | 'partner'>('company');
+  const [uploadSubCategory, setUploadSubCategory] = useState('');
+  const [uploadCustomCategoryName, setUploadCustomCategoryName] = useState('');
+  const [editMainCategory, setEditMainCategory] = useState<'company' | 'partner'>('company');
+  const [editSubCategory, setEditSubCategory] = useState('');
+  const [editCustomCategoryName, setEditCustomCategoryName] = useState('');
+  
   const [uploadFileName, setUploadFileName] = useState('');
   const [uploadIssue, setUploadIssue] = useState('');
   const [uploadExpiry, setUploadExpiry] = useState('');
@@ -601,13 +615,38 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
   // Upload Document Action
   const handleUploadDoc = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!uploadCategory || !selectedFile) {
+    if (!uploadSubCategory || !selectedFile) {
       alert('Please select a file and a category.');
       return;
     }
+    
+    if (uploadSubCategory === 'other' && !uploadCustomCategoryName.trim()) {
+      alert('Please enter a custom category name.');
+      return;
+    }
+
     setIsUploading(true);
 
     try {
+      let finalCategoryId = uploadSubCategory;
+      
+      // If "Others" is selected, create new category in document_categories first
+      if (uploadSubCategory === 'other') {
+        const customName = uploadCustomCategoryName.trim();
+        const customCode = customName.toUpperCase().replace(/[^A-Z0-9]/g, '_');
+        
+        const { data: newCat, error: catError } = await supabase
+          .from('document_categories')
+          .insert([
+            { name: customName, code: customCode, type: 'company' }
+          ])
+          .select()
+          .single();
+          
+        if (catError) throw catError;
+        finalCategoryId = newCat.id;
+      }
+
       const fileName = uploadFileName || selectedFile.name;
       const cleanFileName = fileName.replace(/[^a-zA-Z0-9_.-]/g, '_');
       const filePath = `${companyId}/${Date.now()}_${cleanFileName}`;
@@ -626,7 +665,7 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
       const { error: dbError } = await supabase.from('company_documents').insert([
         {
           company_id: companyId,
-          category_id: uploadCategory,
+          category_id: finalCategoryId,
           file_name: fileName,
           file_path: filePath,
           size_bytes: selectedFile.size,
@@ -651,8 +690,10 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
       ]);
 
       queryClient.invalidateQueries({ queryKey: ['company-documents', companyId] });
+      queryClient.invalidateQueries({ queryKey: ['document-categories'] });
       setIsDocModalOpen(false);
-      setUploadCategory('');
+      setUploadSubCategory('');
+      setUploadCustomCategoryName('');
       setUploadFileName('');
       setUploadIssue('');
       setUploadExpiry('');
@@ -1812,54 +1853,69 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
 
             <form onSubmit={handleUploadDoc} className="space-y-6">
               <div>
-                <label className="block text-label-md text-on-surface-variant mb-2">Document Category</label>
+                <label className="block text-label-md text-on-surface-variant mb-2">Category</label>
                 <select
                   required
-                  value={uploadCategory}
-                  onChange={(e) => setUploadCategory(e.target.value)}
+                  value={uploadMainCategory}
+                  onChange={(e) => {
+                    setUploadMainCategory(e.target.value as any);
+                    setUploadSubCategory('');
+                  }}
                   className="w-full px-4 py-2 border border-border-subtle rounded-lg text-sm bg-white"
                 >
-                  <option value="">Select category...</option>
+                  <option value="company">
+                    {company?.entity_type === 'individual' ? 'Family Document' : 'Company Document'}
+                  </option>
+                  <option value="partner">
+                    {company?.entity_type === 'individual' ? 'Sponsor Document' : 'Partner Document'}
+                  </option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-label-md text-on-surface-variant mb-2">Sub Category</label>
+                <select
+                  required
+                  value={uploadSubCategory}
+                  onChange={(e) => setUploadSubCategory(e.target.value)}
+                  className="w-full px-4 py-2 border border-border-subtle rounded-lg text-sm bg-white"
+                >
+                  <option value="">Select sub category...</option>
                   {(() => {
-                    const companyCats = categories?.filter(
-                      (cat) =>
-                        (cat.type === 'company' || !cat.type) &&
-                        !partnerDocumentKeywords.some((keyword) =>
-                          (cat.name + ' ' + (cat.code || '')).toLowerCase().includes(keyword)
-                        )
-                    );
-                    const partnerCats = categories?.filter(
-                      (cat) =>
-                        (cat.type === 'company' || !cat.type) &&
-                        partnerDocumentKeywords.some((keyword) =>
-                          (cat.name + ' ' + (cat.code || '')).toLowerCase().includes(keyword)
-                        )
-                    );
+                    const filtered = categories?.filter((cat) => {
+                      if (cat.type !== 'company' && cat.type) return false;
+                      const isPartner = partnerDocumentKeywords.some((keyword) =>
+                        (cat.name + ' ' + (cat.code || '')).toLowerCase().includes(keyword)
+                      );
+                      return uploadMainCategory === 'partner' ? isPartner : !isPartner;
+                    });
                     return (
                       <>
-                        {companyCats && companyCats.length > 0 && (
-                          <optgroup label="Company Documents">
-                            {companyCats.map((cat) => (
-                              <option key={cat.id} value={cat.id}>
-                                {cat.name}
-                              </option>
-                            ))}
-                          </optgroup>
-                        )}
-                        {partnerCats && partnerCats.length > 0 && (
-                          <optgroup label="Partner Documents">
-                            {partnerCats.map((cat) => (
-                              <option key={cat.id} value={cat.id}>
-                                {cat.name}
-                              </option>
-                            ))}
-                          </optgroup>
-                        )}
+                        {filtered?.map((cat) => (
+                          <option key={cat.id} value={cat.id}>
+                            {cat.name}
+                          </option>
+                        ))}
+                        <option value="other">Others (Create New Category)</option>
                       </>
                     );
                   })()}
                 </select>
               </div>
+
+              {uploadSubCategory === 'other' && (
+                <div>
+                  <label className="block text-label-md text-on-surface-variant mb-2">Custom Category Name</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. Special Agreement"
+                    value={uploadCustomCategoryName}
+                    onChange={(e) => setUploadCustomCategoryName(e.target.value)}
+                    className="w-full px-4 py-2 border border-border-subtle rounded-lg text-sm"
+                  />
+                </div>
+              )}
 
               <div>
                 <label className="block text-label-md text-on-surface-variant mb-2">Select File</label>
@@ -2138,15 +2194,46 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
             </div>
 
             <form
-              onSubmit={(e) => {
+              onSubmit={async (e) => {
                 e.preventDefault();
-                updateDocMutation.mutate({
-                  id: editingDoc.id,
-                  file_name: editDocName,
-                  issue_date: editDocIssue || null,
-                  expiry_date: editDocExpiry || null,
-                  category_id: editDocCategory,
-                });
+                if (!editSubCategory) {
+                  alert('Please select a category.');
+                  return;
+                }
+                if (editSubCategory === 'other' && !editCustomCategoryName.trim()) {
+                  alert('Please enter a custom category name.');
+                  return;
+                }
+
+                let finalCategoryId = editSubCategory;
+
+                try {
+                  if (editSubCategory === 'other') {
+                    const customName = editCustomCategoryName.trim();
+                    const customCode = customName.toUpperCase().replace(/[^A-Z0-9]/g, '_');
+                    
+                    const { data: newCat, error: catError } = await supabase
+                      .from('document_categories')
+                      .insert([
+                        { name: customName, code: customCode, type: 'company' }
+                      ])
+                      .select()
+                      .single();
+                      
+                    if (catError) throw catError;
+                    finalCategoryId = newCat.id;
+                  }
+
+                  updateDocMutation.mutate({
+                    id: editingDoc.id,
+                    file_name: editDocName,
+                    issue_date: editDocIssue || null,
+                    expiry_date: editDocExpiry || null,
+                    category_id: finalCategoryId,
+                  });
+                } catch (err: any) {
+                  alert('Failed to save category: ' + err.message);
+                }
               }}
               className="space-y-4"
             >
@@ -2162,20 +2249,69 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
               </div>
 
               <div>
-                <label className="block text-label-md text-on-surface-variant mb-1">Document Category</label>
+                <label className="block text-label-md text-on-surface-variant mb-1">Category</label>
                 <select
                   required
-                  value={editDocCategory}
-                  onChange={(e) => setEditDocCategory(e.target.value)}
+                  value={editMainCategory}
+                  onChange={(e) => {
+                    setEditMainCategory(e.target.value as any);
+                    setEditSubCategory('');
+                  }}
                   className="w-full px-4 py-2 border border-border-subtle rounded-lg text-sm bg-white focus:outline-primary"
                 >
-                  {categories?.filter((cat) => cat.type === 'company').map((cat) => (
-                    <option key={cat.id} value={cat.id}>
-                      {cat.name}
-                    </option>
-                  ))}
+                  <option value="company">
+                    {company?.entity_type === 'individual' ? 'Family Document' : 'Company Document'}
+                  </option>
+                  <option value="partner">
+                    {company?.entity_type === 'individual' ? 'Sponsor Document' : 'Partner Document'}
+                  </option>
                 </select>
               </div>
+
+              <div>
+                <label className="block text-label-md text-on-surface-variant mb-1">Sub Category</label>
+                <select
+                  required
+                  value={editSubCategory}
+                  onChange={(e) => setEditSubCategory(e.target.value)}
+                  className="w-full px-4 py-2 border border-border-subtle rounded-lg text-sm bg-white focus:outline-primary"
+                >
+                  <option value="">Select sub category...</option>
+                  {(() => {
+                    const filtered = categories?.filter((cat) => {
+                      if (cat.type !== 'company' && cat.type) return false;
+                      const isPartner = partnerDocumentKeywords.some((keyword) =>
+                        (cat.name + ' ' + (cat.code || '')).toLowerCase().includes(keyword)
+                      );
+                      return editMainCategory === 'partner' ? isPartner : !isPartner;
+                    });
+                    return (
+                      <>
+                        {filtered?.map((cat) => (
+                          <option key={cat.id} value={cat.id}>
+                            {cat.name}
+                          </option>
+                        ))}
+                        <option value="other">Others (Create New Category)</option>
+                      </>
+                    );
+                  })()}
+                </select>
+              </div>
+
+              {editSubCategory === 'other' && (
+                <div>
+                  <label className="block text-label-md text-on-surface-variant mb-1">Custom Category Name</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. Special Agreement"
+                    value={editCustomCategoryName}
+                    onChange={(e) => setEditCustomCategoryName(e.target.value)}
+                    className="w-full px-4 py-2 border border-border-subtle rounded-lg text-sm focus:outline-primary"
+                  />
+                </div>
+              )}
 
               <div className="grid grid-cols-2 gap-sm">
                 <div>
