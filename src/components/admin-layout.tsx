@@ -14,7 +14,7 @@ interface SidebarItem {
 const sidebarItems: SidebarItem[] = [
   { name: 'Dashboard', href: '/', icon: 'dashboard' },
   { name: 'Companies', href: '/companies', icon: 'business' },
-  { name: 'Families', href: '/companies?filter=family', icon: 'family_restroom' },
+  { name: 'Families', href: '/families', icon: 'family_restroom' },
   { name: 'Company Groups', href: '/groups', icon: 'corporate_fare' },
   { name: 'Renewals', href: '/renewals', icon: 'event_repeat' },
   { name: 'Notifications', href: '/notifications', icon: 'notifications' },
@@ -75,19 +75,7 @@ function AdminLayoutInner({ children }: { children: React.ReactNode }) {
         {/* Navigation Tabs */}
         <nav className="flex-1 px-md space-y-1 overflow-y-auto custom-scrollbar">
           {sidebarItems.map((item) => {
-            let isActive = false;
-            if (item.href.startsWith('/companies') && pathname.startsWith('/companies')) {
-              // Special handling for Companies vs Families
-              const wantsFamily = item.href.includes('filter=family');
-              const currentFilter = searchParams.get('filter');
-              if (wantsFamily) {
-                isActive = currentFilter === 'family';
-              } else {
-                isActive = !currentFilter || currentFilter === '';
-              }
-            } else {
-              isActive = pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href));
-            }
+            const isActive = pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href));
             return (
               <Link
                 key={item.name}

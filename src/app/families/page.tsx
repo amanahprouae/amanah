@@ -41,9 +41,9 @@ const companySchema = zod.object({
   }
 });
 
-type CompanyFormFields = zod.infer<typeof companySchema>;
+type FamilyFormFields = zod.infer<typeof companySchema>;
 
-export default function CompaniesPage() {
+export default function FamiliesPage() {
   const queryClient = useQueryClient();
   const { profile } = useAuth();
   const [searchTerm, setSearchTerm] = useState('');
@@ -56,10 +56,10 @@ export default function CompaniesPage() {
     reset,
     watch,
     formState: { errors },
-  } = useForm<CompanyFormFields>({
+  } = useForm<FamilyFormFields>({
     resolver: zodResolver(companySchema),
     defaultValues: {
-      entity_type: 'corporate',
+      entity_type: 'individual',
     },
   });
 
@@ -99,7 +99,7 @@ export default function CompaniesPage() {
 
   // Add Company Mutation
   const addCompanyMutation = useMutation({
-    mutationFn: async (newData: CompanyFormFields) => {
+    mutationFn: async (newData: FamilyFormFields) => {
       const isCorporate = newData.entity_type === 'corporate';
       const { data, error } = await supabase
         .from('companies')
@@ -168,17 +168,16 @@ export default function CompaniesPage() {
     },
   });
 
-  const onSubmit = (data: CompanyFormFields) => {
+  const onSubmit = (data: FamilyFormFields) => {
     addCompanyMutation.mutate(data);
   };
 
   // Filter & Search Logic
   const filteredCompanies = (companies || []).filter((company) => {
-    const matchesSearch = company.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (company.trade_license_number && company.trade_license_number.toLowerCase().includes(searchTerm.toLowerCase()));
+    const matchesSearch = company.name.toLowerCase().includes(searchTerm.toLowerCase());
     
     const matchesStatus = statusFilter === 'all' || company.status === statusFilter;
-    const matchesEntity = company.entity_type === 'corporate';
+    const matchesEntity = company.entity_type === 'individual';
 
     return matchesSearch && matchesStatus && matchesEntity;
   });
@@ -189,15 +188,15 @@ export default function CompaniesPage() {
         {/* Page Header */}
         <div className="flex justify-between items-center">
           <div>
-            <h1 className="font-display text-3xl font-extrabold text-on-surface tracking-tight">Company Management</h1>
-            <p className="font-body-md text-body-md text-on-surface-variant">View and manage corporate clients, licensing, and compliance profiles.</p>
+            <h1 className="font-display text-3xl font-extrabold text-on-surface tracking-tight">Family Management</h1>
+            <p className="font-body-md text-body-md text-on-surface-variant">View and manage family & sponsor profiles.</p>
           </div>
           <button
             onClick={() => setIsModalOpen(true)}
             className="px-md py-2 bg-primary text-white rounded-lg font-label-md text-label-md hover:bg-primary/90 transition-all flex items-center gap-2"
           >
             <span className="material-symbols-outlined text-[16px]">add</span>
-            <span>Add Company</span>
+            <span>Add Family / Sponsor</span>
           </button>
         </div>
 
@@ -212,7 +211,7 @@ export default function CompaniesPage() {
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-10 pr-4 py-2 bg-white border border-border-subtle rounded-lg focus:ring-2 focus:ring-primary text-body-sm"
-              placeholder="Search by company name or license number..."
+              placeholder="Search by family or sponsor name..."
             />
           </div>
 
@@ -324,7 +323,7 @@ export default function CompaniesPage() {
                         </td>
                         <td className="p-lg text-right space-x-2">
                           <Link
-                            href={`/companies/${company.id}`}
+                            href={`/families/${company.id}`}
                             className="inline-flex items-center gap-1 px-3 py-1.5 bg-surface border border-border-subtle rounded-lg text-xs font-semibold hover:bg-surface-container-low transition-colors text-primary"
                           >
                             <span>Manage</span>
@@ -368,7 +367,7 @@ export default function CompaniesPage() {
               </div>
 
               <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
-                <input type="hidden" value="corporate" {...register('entity_type')} />
+                <input type="hidden" value="individual" {...register('entity_type')} />
 
                 <div>
                   <label className="block text-label-md text-on-surface-variant mb-2">
