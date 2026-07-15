@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import AdminLayout from '@/components/admin-layout';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
@@ -173,13 +174,23 @@ export default function CompaniesPage() {
   };
 
   // Filter & Search Logic
+  const searchParams = useSearchParams();
+  const entityFilter = searchParams.get('filter');
+
   const filteredCompanies = (companies || []).filter((company) => {
     const matchesSearch = company.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       (company.trade_license_number && company.trade_license_number.toLowerCase().includes(searchTerm.toLowerCase()));
     
     const matchesStatus = statusFilter === 'all' || company.status === statusFilter;
+    let matchesEntity = true;
+    if (entityFilter === 'family') {
+      matchesEntity = company.entity_type === 'individual';
+    } else {
+      // Default Companies tab should show only corporate entities
+      matchesEntity = company.entity_type === 'corporate';
+    }
 
-    return matchesSearch && matchesStatus;
+    return matchesSearch && matchesStatus && matchesEntity;
   });
 
   return (
