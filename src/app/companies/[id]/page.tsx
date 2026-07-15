@@ -953,7 +953,9 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
               {/* General Details */}
               <div className="bg-white p-lg border border-border-subtle rounded-2xl shadow-sm">
                 <div className="flex justify-between items-center mb-lg">
-                  <h3 className="font-title-lg text-title-lg text-on-surface">Company Information</h3>
+                  <h3 className="font-title-lg text-title-lg text-on-surface">
+                    {company.entity_type === 'individual' ? 'Family / Sponsor Information' : 'Company Information'}
+                  </h3>
                   <button
                     onClick={handleOpenEditModal}
                     className="text-primary font-label-md text-label-md font-bold hover:underline cursor-pointer"
@@ -962,26 +964,30 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
                   </button>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-y-lg gap-x-xl text-sm">
-                  <div>
-                    <p className="text-[10px] uppercase font-bold tracking-wider text-on-surface-variant mb-1">Trade License No</p>
-                    <p className="font-title-md text-on-surface font-semibold">{company.trade_license_number || 'N/A'}</p>
-                  </div>
-                  <div>
-                    <p className="text-[10px] uppercase font-bold tracking-wider text-on-surface-variant mb-1">Trade License Issue Date</p>
-                    <p className="font-title-md text-on-surface font-semibold">
-                      {company.trade_license_issue ? new Date(company.trade_license_issue).toLocaleDateString() : 'N/A'}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-[10px] uppercase font-bold tracking-wider text-on-surface-variant mb-1">Trade License Expiry Date</p>
-                    <p className="font-title-md text-on-surface font-semibold">
-                      {company.trade_license_expiry ? new Date(company.trade_license_expiry).toLocaleDateString() : 'N/A'}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-[10px] uppercase font-bold tracking-wider text-on-surface-variant mb-1">VAT Number</p>
-                    <p className="font-title-md text-on-surface font-semibold">{company.vat_number || 'N/A'}</p>
-                  </div>
+                  {company.entity_type !== 'individual' && (
+                    <>
+                      <div>
+                        <p className="text-[10px] uppercase font-bold tracking-wider text-on-surface-variant mb-1">Trade License No</p>
+                        <p className="font-title-md text-on-surface font-semibold">{company.trade_license_number || 'N/A'}</p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] uppercase font-bold tracking-wider text-on-surface-variant mb-1">Trade License Issue Date</p>
+                        <p className="font-title-md text-on-surface font-semibold">
+                          {company.trade_license_issue ? new Date(company.trade_license_issue).toLocaleDateString() : 'N/A'}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] uppercase font-bold tracking-wider text-on-surface-variant mb-1">Trade License Expiry Date</p>
+                        <p className="font-title-md text-on-surface font-semibold">
+                          {company.trade_license_expiry ? new Date(company.trade_license_expiry).toLocaleDateString() : 'N/A'}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] uppercase font-bold tracking-wider text-on-surface-variant mb-1">VAT Number</p>
+                        <p className="font-title-md text-on-surface font-semibold">{company.vat_number || 'N/A'}</p>
+                      </div>
+                    </>
+                  )}
                   <div>
                     <p className="text-[10px] uppercase font-bold tracking-wider text-on-surface-variant mb-1">Subscription Plan</p>
                     {company.subscription_plan === 'Premium Gold' ? (
