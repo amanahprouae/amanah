@@ -15,13 +15,17 @@ export default function UsersRolesPage() {
   const [newEmail, setNewEmail] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [newRole, setNewRole] = useState('client');
+  const [newClientType, setNewClientType] = useState<'company' | 'group'>('company');
   const [newCompanyId, setNewCompanyId] = useState('');
+  const [newGroupId, setNewGroupId] = useState('');
   const [isCreating, setIsCreating] = useState(false);
 
   // Edit State
   const [editingUser, setEditingUser] = useState<any | null>(null);
   const [editRole, setEditRole] = useState('');
+  const [editClientType, setEditClientType] = useState<'company' | 'group'>('company');
   const [editCompanyId, setEditCompanyId] = useState('');
+  const [editGroupId, setEditGroupId] = useState('');
   const [isUpdating, setIsUpdating] = useState(false);
 
   // Fetch Users
@@ -30,7 +34,7 @@ export default function UsersRolesPage() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('users')
-        .select('*, roles(name), companies(name)')
+        .select('*, roles(name), companies(name), company_groups:group_id(name)')
         .order('name');
       if (error) throw error;
       return data || [];
@@ -42,6 +46,16 @@ export default function UsersRolesPage() {
     queryKey: ['companies'],
     queryFn: async () => {
       const { data, error } = await supabase.from('companies').select('id, name').order('name');
+      if (error) throw error;
+      return data || [];
+    },
+  });
+
+  // Fetch Groups
+  const { data: groups } = useQuery({
+    queryKey: ['groups-list'],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('company_groups').select('id, name').order('name');
       if (error) throw error;
       return data || [];
     },
@@ -87,7 +101,8 @@ export default function UsersRolesPage() {
           p_password: newPassword,
           p_name: newName,
           p_role: newRole,
-          p_company_id: newRole === 'client' && newCompanyId ? newCompanyId : null,
+          p_company_id: newRole === 'client' && newClientType === 'company' && newCompanyId ? newCompanyId : null,
+          p_group_id: newRole === 'client' && newClientType === 'group' && newGroupId ? newGroupId : null,
         }),
       });
 
@@ -101,6 +116,8 @@ export default function UsersRolesPage() {
       setNewPassword('');
       setNewRole('client');
       setNewCompanyId('');
+      setNewGroupId('');
+      setNewClientType('company');
     } catch (err: any) {
       console.error(err);
       alert('Error creating user: ' + (err.message || err));
@@ -127,7 +144,8 @@ export default function UsersRolesPage() {
         .from('users')
         .update({
           role_id: roleData.id,
-          company_id: editRole === 'client' && editCompanyId ? editCompanyId : null,
+          company_id: editRole === 'client' && editClientType === 'company' && editCompanyId ? editCompanyId : null,
+          group_id: editRole === 'client' && editClientType === 'group' && editGroupId ? editGroupId : null,
         })
         .eq('id', editingUser.id);
 
@@ -229,7 +247,16 @@ export default function UsersRolesPage() {
                         </span>
                       </td>
                       <td className="p-lg font-semibold text-on-surface-variant">
-                        {user.companies?.name || <span className="italic text-xs font-normal">Internal Staff (PRO)</span>}
+                        {user.companies?.name ? (
+                          <span>{user.companies.name}</span>
+                        ) : user.company_groups?.name ? (
+                          <span className="inline-flex items-center gap-1 text-primary font-bold">
+                            <span className="material-symbols-outlined text-[14px]">corporate_fare</span>
+                            <span>{user.company_groups.name}</span>
+                          </span>
+                        ) : (
+                          <span className="italic text-xs font-normal text-on-surface-variant">Internal Staff (PRO)</span>
+                        )}
                       </td>
                       <td className="p-lg text-center">
                         <span
@@ -249,7 +276,9 @@ export default function UsersRolesPage() {
                           onClick={() => {
                             setEditingUser(user);
                             setEditRole(user.roles?.name || 'client');
+                            setEditClientType(user.group_id ? 'group' : 'company');
                             setEditCompanyId(user.company_id || '');
+                            setEditGroupId(user.group_id || '');
                           }}
                           className="px-2.5 py-1.5 border border-border-subtle rounded-lg text-xs font-semibold hover:bg-surface-container-low transition-colors cursor-pointer text-primary"
                         >
@@ -348,21 +377,53 @@ export default function UsersRolesPage() {
                 </div>
 
                 {newRole === 'client' && (
-                  <div>
-                    <label className="block text-label-md text-on-surface-variant mb-1">Associated Company</label>
-                    <select
-                      value={newCompanyId}
-                      onChange={(e) => setNewCompanyId(e.target.value)}
-                      className="w-full px-4 py-2 border border-border-subtle rounded-lg text-sm bg-white"
-                    >
-                      <option value="">None (Individual / Unassigned)</option>
-                      {companies?.map((company) => (
-                        <option key={company.id} value={company.id}>
-                          {company.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                  <>
+                    <div>
+                      <label className="block text-label-md text-on-surface-variant mb-1">Client Account Type</label>
+                      <select
+                        value={newClientType}
+                        onChange={(e) => setNewClientType(e.target.value as 'company' | 'group')}
+                        className="w-full px-4 py-2 border border-border-subtle rounded-lg text-sm bg-white"
+                      >
+                        <option value="company">Standalone Company</option>
+                        <option value="group">Group of Companies</option>
+                      </select>
+                    </div>
+
+                    {newClientType === 'company' ? (
+                      <div>
+                        <label className="block text-label-md text-on-surface-variant mb-1">Associated Company</label>
+                        <select
+                          value={newCompanyId}
+                          onChange={(e) => setNewCompanyId(e.target.value)}
+                          className="w-full px-4 py-2 border border-border-subtle rounded-lg text-sm bg-white"
+                        >
+                          <option value="">None (Individual / Unassigned)</option>
+                          {companies?.map((company) => (
+                            <option key={company.id} value={company.id}>
+                              {company.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    ) : (
+                      <div>
+                        <label className="block text-label-md text-on-surface-variant mb-1">Associated Company Group</label>
+                        <select
+                          value={newGroupId}
+                          onChange={(e) => setNewGroupId(e.target.value)}
+                          className="w-full px-4 py-2 border border-border-subtle rounded-lg text-sm bg-white"
+                        >
+                          <option value="">Select Company Group</option>
+                          {groups?.map((group) => (
+                            <option key={group.id} value={group.id}>
+                              {group.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                  </>
                 )}
 
                 <div className="flex gap-sm justify-end pt-4 border-t border-border-subtle">
@@ -417,21 +478,53 @@ export default function UsersRolesPage() {
                 </div>
 
                 {editRole === 'client' && (
-                  <div>
-                    <label className="block text-label-md text-on-surface-variant mb-1">Associated Company</label>
-                    <select
-                      value={editCompanyId}
-                      onChange={(e) => setEditCompanyId(e.target.value)}
-                      className="w-full px-4 py-2 border border-border-subtle rounded-lg text-sm bg-white"
-                    >
-                      <option value="">None (Individual / Unassigned)</option>
-                      {companies?.map((company) => (
-                        <option key={company.id} value={company.id}>
-                          {company.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                  <>
+                    <div>
+                      <label className="block text-label-md text-on-surface-variant mb-1">Client Account Type</label>
+                      <select
+                        value={editClientType}
+                        onChange={(e) => setEditClientType(e.target.value as 'company' | 'group')}
+                        className="w-full px-4 py-2 border border-border-subtle rounded-lg text-sm bg-white"
+                      >
+                        <option value="company">Standalone Company</option>
+                        <option value="group">Group of Companies</option>
+                      </select>
+                    </div>
+
+                    {editClientType === 'company' ? (
+                      <div>
+                        <label className="block text-label-md text-on-surface-variant mb-1">Associated Company</label>
+                        <select
+                          value={editCompanyId}
+                          onChange={(e) => setEditCompanyId(e.target.value)}
+                          className="w-full px-4 py-2 border border-border-subtle rounded-lg text-sm bg-white"
+                        >
+                          <option value="">None (Individual / Unassigned)</option>
+                          {companies?.map((company) => (
+                            <option key={company.id} value={company.id}>
+                              {company.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    ) : (
+                      <div>
+                        <label className="block text-label-md text-on-surface-variant mb-1">Associated Company Group</label>
+                        <select
+                          value={editGroupId}
+                          onChange={(e) => setEditGroupId(e.target.value)}
+                          className="w-full px-4 py-2 border border-border-subtle rounded-lg text-sm bg-white"
+                        >
+                          <option value="">Select Company Group</option>
+                          {groups?.map((group) => (
+                            <option key={group.id} value={group.id}>
+                              {group.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                  </>
                 )}
 
                 <div className="flex gap-sm justify-end pt-4 border-t border-border-subtle">

@@ -22,6 +22,7 @@ const companySchema = zod.object({
   logo_url: zod.string().url().or(zod.string().length(0)).optional(),
   email: zod.string().email({ message: 'Invalid email address' }).or(zod.string().length(0)).optional(),
   phone: zod.string().or(zod.string().length(0)).optional(),
+  group_id: zod.string().or(zod.string().length(0)).optional(),
 });
 
 type CompanyFormFields = zod.infer<typeof companySchema>;
@@ -51,10 +52,24 @@ export default function CompaniesPage() {
         .select(`
           *,
           employees(id, status),
-          renewal_requests(id, status)
+          renewal_requests(id, status),
+          company_groups:group_id(id, name)
         `)
         .order('name');
 
+      if (error) throw error;
+      return data || [];
+    },
+  });
+
+  // Fetch Groups for assignment selector
+  const { data: groups } = useQuery({
+    queryKey: ['groups-list'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('company_groups')
+        .select('id, name')
+        .order('name');
       if (error) throw error;
       return data || [];
     },
@@ -75,6 +90,7 @@ export default function CompaniesPage() {
             status: 'active',
             email: newData.email || null,
             phone: newData.phone || null,
+            group_id: newData.group_id || null,
           },
         ])
         .select();
@@ -232,7 +248,14 @@ export default function CompaniesPage() {
                             </div>
                             <div className="flex flex-col">
                               <span className="font-bold text-on-surface">{company.name}</span>
-                              <span className="text-[11px] text-on-surface-variant">Corporate Member</span>
+                              {company.company_groups ? (
+                                <span className="text-[11px] text-primary font-semibold flex items-center gap-0.5 mt-0.5">
+                                  <span className="material-symbols-outlined text-[12px]">corporate_fare</span>
+                                  <span>{company.company_groups.name}</span>
+                                </span>
+                              ) : (
+                                <span className="text-[11px] text-on-surface-variant">Corporate Member</span>
+                              )}
                             </div>
                           </div>
                         </td>
@@ -376,6 +399,21 @@ export default function CompaniesPage() {
                     placeholder="https://example.com/logo.png"
                     {...register('logo_url')}
                   />
+                </div>
+
+                <div>
+                  <label className="block text-label-md text-on-surface-variant mb-2">Company Group (Optional)</label>
+                  <select
+                    className="w-full px-4 py-2 border border-border-subtle rounded-lg text-sm bg-white focus:ring-2 focus:ring-primary focus:outline-none"
+                    {...register('group_id')}
+                  >
+                    <option value="">Standalone Company (No Group)</option>
+                    {groups?.map((group: any) => (
+                      <option key={group.id} value={group.id}>
+                        {group.name}
+                      </option>
+                    ))}
+                  </select>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-sm">

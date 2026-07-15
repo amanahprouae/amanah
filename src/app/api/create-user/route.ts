@@ -21,7 +21,7 @@ export async function POST(request: NextRequest) {
       auth: { autoRefreshToken: false, persistSession: false },
     });
 
-    const { p_email, p_password, p_name, p_role, p_company_id } = await request.json();
+    const { p_email, p_password, p_name, p_role, p_company_id, p_group_id } = await request.json();
 
     if (!p_email || !p_password || !p_name) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
@@ -36,6 +36,7 @@ export async function POST(request: NextRequest) {
         name: p_name,
         role: p_role,
         company_id: p_company_id || null,
+        group_id: p_group_id || null,
       },
     });
 
@@ -66,6 +67,7 @@ export async function POST(request: NextRequest) {
           email: p_email,
           role_id: roleData.id,
           company_id: p_role === 'client' && p_company_id ? p_company_id : null,
+          group_id: p_role === 'client' && p_group_id ? p_group_id : null,
           status: 'active',
         },
         { onConflict: 'id' }

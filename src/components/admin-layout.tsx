@@ -14,6 +14,7 @@ interface SidebarItem {
 const sidebarItems: SidebarItem[] = [
   { name: 'Dashboard', href: '/', icon: 'dashboard' },
   { name: 'Companies', href: '/companies', icon: 'business' },
+  { name: 'Company Groups', href: '/groups', icon: 'corporate_fare' },
   { name: 'Renewals', href: '/renewals', icon: 'event_repeat' },
   { name: 'Notifications', href: '/notifications', icon: 'notifications' },
   { name: 'Support Requests', href: '/support', icon: 'help_center' },

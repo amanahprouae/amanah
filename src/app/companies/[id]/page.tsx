@@ -42,15 +42,32 @@ const companyEditSchema = zod.object({
   assigned_pro: zod.string().or(zod.string().length(0)).optional(),
   email: zod.string().email({ message: 'Invalid email address' }).or(zod.string().length(0)).optional(),
   phone: zod.string().or(zod.string().length(0)).optional(),
+  group_id: zod.string().or(zod.string().length(0)).optional(),
 });
 
 type CompanyEditFormFields = zod.infer<typeof companyEditSchema>;
+
+type CompanyDocumentRow = {
+  id?: string;
+  file_name?: string | null;
+  file_path?: string | null;
+  issue_date?: string | null;
+  expiry_date?: string | null;
+  size_bytes?: number | null;
+  document_categories?: {
+    name?: string | null;
+    code?: string | null;
+  } | null;
+};
+
+type DocumentSummaryFilter = 'all' | 'company' | 'partner';
 
 export default function CompanyDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id: companyId } = use(params);
   const queryClient = useQueryClient();
   const { profile } = useAuth();
   const [activeTab, setActiveTab] = useState<'overview' | 'documents' | 'employees' | 'renewals' | 'activity'>('overview');
+  const [documentSummaryFilter, setDocumentSummaryFilter] = useState<DocumentSummaryFilter>('all');
   const [isEmployeeModalOpen, setIsEmployeeModalOpen] = useState(false);
   const [isDocModalOpen, setIsDocModalOpen] = useState(false);
   const [isEditCompanyModalOpen, setIsEditCompanyModalOpen] = useState(false);
@@ -98,6 +115,7 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
           assigned_pro: fields.assigned_pro || null,
           email: fields.email || null,
           phone: fields.phone || null,
+          group_id: fields.group_id || null,
         })
         .eq('id', companyId)
         .select()
@@ -133,6 +151,7 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
         assigned_pro: company.assigned_pro || '',
         email: company.email || '',
         phone: company.phone || '',
+        group_id: company.group_id || '',
       });
       setIsEditCompanyModalOpen(true);
     }
@@ -356,6 +375,19 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
     },
   });
 
+  // Fetch Company Groups for selector
+  const { data: groupsList } = useQuery({
+    queryKey: ['groups-list'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('company_groups')
+        .select('id, name')
+        .order('name');
+      if (error) throw error;
+      return data || [];
+    },
+  });
+
   // Fetch Company Documents
   const { data: documents, isLoading: isDocsLoading } = useQuery({
     queryKey: ['company-documents', companyId],
@@ -409,6 +441,89 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
       return data || [];
     },
   });
+
+  const partnerDocumentKeywords = [
+    'partner',
+    'sponsor',
+    'shareholder',
+    'owner',
+    'passport',
+    'visa',
+    'eid',
+    'emirates id',
+    'emirates-id',
+    'resident',
+    'residence',
+    'residency',
+  ];
+
+  const isPartnerDocument = (doc: CompanyDocumentRow) => {
+    const searchableText = [
+      doc.file_name,
+      doc.document_categories?.name,
+      doc.document_categories?.code,
+    ].filter(Boolean).join(' ').toLowerCase();
+
+    return partnerDocumentKeywords.some((keyword) => searchableText.includes(keyword));
+  };
+
+  const getDocumentStatusCounts = (docs: CompanyDocumentRow[]) => {
+    const today = new Date();
+    const thirtyDaysFromNow = new Date(today.getTime() + 30 * 24 * 60 * 60 * 1000);
+
+    return docs.reduce(
+      (counts, doc) => {
+        if (!doc.expiry_date) {
+          counts.active += 1;
+          return counts;
+        }
+
+        const expiryDate = new Date(doc.expiry_date);
+        if (expiryDate < today) {
+          counts.expired += 1;
+        } else if (expiryDate < thirtyDaysFromNow) {
+          counts.expiringSoon += 1;
+        } else {
+          counts.active += 1;
+        }
+
+        return counts;
+      },
+      { active: 0, expiringSoon: 0, expired: 0 }
+    );
+  };
+
+  const getTopDocumentCategories = (docs: CompanyDocumentRow[]) => {
+    const categoryCounts = docs.reduce<Record<string, number>>((counts, doc) => {
+      const categoryName = doc.document_categories?.name || 'Other';
+      counts[categoryName] = (counts[categoryName] || 0) + 1;
+      return counts;
+    }, {});
+
+    return Object.entries(categoryCounts)
+      .sort(([, a], [, b]) => b - a)
+      .slice(0, 4)
+      .map(([name, count]) => ({ name, count }));
+  };
+
+  const companyDocumentSummary = (documents || []).filter((doc) => !isPartnerDocument(doc));
+  const partnerDocumentSummary = (documents || []).filter(isPartnerDocument);
+  const companyDocumentStatusCounts = getDocumentStatusCounts(companyDocumentSummary);
+  const partnerDocumentStatusCounts = getDocumentStatusCounts(partnerDocumentSummary);
+  const companyDocumentCategories = getTopDocumentCategories(companyDocumentSummary);
+  const partnerDocumentCategories = getTopDocumentCategories(partnerDocumentSummary);
+  const visibleCompanyDocuments =
+    documentSummaryFilter === 'company'
+      ? companyDocumentSummary
+      : documentSummaryFilter === 'partner'
+        ? partnerDocumentSummary
+        : documents || [];
+  const documentFilterLabel =
+    documentSummaryFilter === 'company'
+      ? 'Company Documents'
+      : documentSummaryFilter === 'partner'
+        ? 'Partner Documents'
+        : 'All Company Documents';
 
   // Add Employee Mutation
   const addEmployeeMutation = useMutation({
@@ -789,7 +904,12 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
           {(['overview', 'documents', 'employees', 'renewals'] as const).map((tab) => (
             <button
               key={tab}
-              onClick={() => setActiveTab(tab)}
+              onClick={() => {
+                if (tab === 'documents') {
+                  setDocumentSummaryFilter('all');
+                }
+                setActiveTab(tab);
+              }}
               className={`pb-md font-body-md text-sm capitalize transition-all cursor-pointer ${
                 activeTab === tab
                   ? 'text-primary font-bold border-b-2 border-primary'
@@ -884,39 +1004,74 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
               {/* Document Summary Card */}
               <div className="bg-white p-lg border border-border-subtle rounded-2xl shadow-sm">
                 <h3 className="font-title-lg text-title-lg text-on-surface mb-lg">Documents Summary</h3>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-md">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-md">
                   <div
-                    onClick={() => setActiveTab('documents')}
-                    className="p-md bg-surface-container-low rounded-xl border border-border-subtle hover:border-primary transition-colors cursor-pointer group"
+                    onClick={() => {
+                      setDocumentSummaryFilter('company');
+                      setActiveTab('documents');
+                    }}
+                    className="p-md bg-surface-container-low rounded-xl border border-border-subtle hover:border-primary transition-colors cursor-pointer"
                   >
-                    <div className="flex justify-between items-start mb-sm">
-                      <span className="material-symbols-outlined text-primary bg-primary-container/10 p-2 rounded-lg">gavel</span>
-                      <span className="text-[11px] font-bold text-on-surface-variant">Legal</span>
+                    <div className="flex justify-between items-start gap-md mb-md">
+                      <span className="material-symbols-outlined text-primary bg-primary-container/10 p-2 rounded-lg">business_center</span>
+                      <div className="text-right">
+                        <span className="block text-2xl font-extrabold text-on-surface">{companyDocumentSummary.length}</span>
+                        <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Uploaded</span>
+                      </div>
                     </div>
-                    <h4 className="font-title-md text-on-surface font-bold mb-xs">Licensing Docs</h4>
-                    <p className="text-xs text-on-surface-variant">MOA, Power of Attorney, Certificates</p>
+                    <h4 className="font-title-md text-on-surface font-bold mb-xs">Company Documents</h4>
+                    <p className="text-xs text-on-surface-variant mb-md">TL, MOA, POA, certificates and establishment records</p>
+                    <div className="flex flex-wrap gap-2 mb-md">
+                      <span className="px-2 py-1 rounded-full bg-success/10 text-success text-[10px] font-bold">Active {companyDocumentStatusCounts.active}</span>
+                      <span className="px-2 py-1 rounded-full bg-warning/10 text-warning text-[10px] font-bold">Soon {companyDocumentStatusCounts.expiringSoon}</span>
+                      <span className="px-2 py-1 rounded-full bg-danger/10 text-danger text-[10px] font-bold">Expired {companyDocumentStatusCounts.expired}</span>
+                    </div>
+                    {companyDocumentCategories.length > 0 ? (
+                      <div className="space-y-2">
+                        {companyDocumentCategories.map((category) => (
+                          <div key={category.name} className="flex items-center justify-between text-xs">
+                            <span className="text-on-surface-variant font-medium truncate pr-3">{category.name}</span>
+                            <span className="font-bold text-on-surface">{category.count}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-on-surface-variant">No company documents uploaded.</p>
+                    )}
                   </div>
                   <div
-                    onClick={() => setActiveTab('documents')}
-                    className="p-md bg-surface-container-low rounded-xl border border-border-subtle hover:border-primary transition-colors cursor-pointer group"
+                    onClick={() => {
+                      setDocumentSummaryFilter('partner');
+                      setActiveTab('documents');
+                    }}
+                    className="p-md bg-surface-container-low rounded-xl border border-border-subtle hover:border-primary transition-colors cursor-pointer"
                   >
-                    <div className="flex justify-between items-start mb-sm">
-                      <span className="material-symbols-outlined text-warning bg-warning/10 p-2 rounded-lg">password</span>
-                      <span className="text-[11px] font-bold text-on-surface-variant">Immigration</span>
+                    <div className="flex justify-between items-start gap-md mb-md">
+                      <span className="material-symbols-outlined text-warning bg-warning/10 p-2 rounded-lg">group</span>
+                      <div className="text-right">
+                        <span className="block text-2xl font-extrabold text-on-surface">{partnerDocumentSummary.length}</span>
+                        <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Uploaded</span>
+                      </div>
                     </div>
-                    <h4 className="font-title-md text-on-surface font-bold mb-xs">Visas & Entry</h4>
-                    <p className="text-xs text-on-surface-variant">Quota documents, Establishment cards</p>
-                  </div>
-                  <div
-                    onClick={() => setActiveTab('documents')}
-                    className="p-md bg-surface-container-low rounded-xl border border-border-subtle hover:border-primary transition-colors cursor-pointer group"
-                  >
-                    <div className="flex justify-between items-start mb-sm">
-                      <span className="material-symbols-outlined text-success bg-success/10 p-2 rounded-lg">work</span>
-                      <span className="text-[11px] font-bold text-on-surface-variant">Labour</span>
+                    <h4 className="font-title-md text-on-surface font-bold mb-xs">Partner Documents</h4>
+                    <p className="text-xs text-on-surface-variant mb-md">Partner or sponsor passport, visa, EID and residency files</p>
+                    <div className="flex flex-wrap gap-2 mb-md">
+                      <span className="px-2 py-1 rounded-full bg-success/10 text-success text-[10px] font-bold">Active {partnerDocumentStatusCounts.active}</span>
+                      <span className="px-2 py-1 rounded-full bg-warning/10 text-warning text-[10px] font-bold">Soon {partnerDocumentStatusCounts.expiringSoon}</span>
+                      <span className="px-2 py-1 rounded-full bg-danger/10 text-danger text-[10px] font-bold">Expired {partnerDocumentStatusCounts.expired}</span>
                     </div>
-                    <h4 className="font-title-md text-on-surface font-bold mb-xs">Labour Permits</h4>
-                    <p className="text-xs text-on-surface-variant">Work contracts, labor cards</p>
+                    {partnerDocumentCategories.length > 0 ? (
+                      <div className="space-y-2">
+                        {partnerDocumentCategories.map((category) => (
+                          <div key={category.name} className="flex items-center justify-between text-xs">
+                            <span className="text-on-surface-variant font-medium truncate pr-3">{category.name}</span>
+                            <span className="font-bold text-on-surface">{category.count}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-on-surface-variant">No partner documents uploaded.</p>
+                    )}
                   </div>
                 </div>
               </div>
@@ -955,14 +1110,31 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
         {activeTab === 'documents' && (
           <div className="space-y-md">
             <div className="bg-white rounded-2xl border border-border-subtle shadow-sm overflow-hidden">
-              <div className="p-lg border-b border-border-subtle flex justify-between items-center bg-bg-subtle">
-                <h3 className="font-title-md text-title-md text-on-surface">Company Documents</h3>
-                <button
-                  onClick={() => setIsDocModalOpen(true)}
-                  className="px-md py-1.5 bg-primary text-white text-xs font-semibold rounded-lg hover:brightness-110 cursor-pointer"
-                >
-                  Upload New Document
-                </button>
+              <div className="p-lg border-b border-border-subtle flex flex-col md:flex-row md:justify-between md:items-center gap-md bg-bg-subtle">
+                <div>
+                  <h3 className="font-title-md text-title-md text-on-surface">{documentFilterLabel}</h3>
+                  {documentSummaryFilter !== 'all' && (
+                    <p className="text-xs text-on-surface-variant mt-1">
+                      Showing documents selected from overview summary.
+                    </p>
+                  )}
+                </div>
+                <div className="flex items-center gap-sm">
+                  {documentSummaryFilter !== 'all' && (
+                    <button
+                      onClick={() => setDocumentSummaryFilter('all')}
+                      className="px-md py-1.5 bg-white border border-border-subtle text-on-surface text-xs font-semibold rounded-lg hover:bg-surface-container-low cursor-pointer"
+                    >
+                      Show All
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setIsDocModalOpen(true)}
+                    className="px-md py-1.5 bg-primary text-white text-xs font-semibold rounded-lg hover:brightness-110 cursor-pointer"
+                  >
+                    Upload New Document
+                  </button>
+                </div>
               </div>
               <div className="overflow-x-auto custom-scrollbar">
                 <table className="w-full border-collapse text-left text-sm">
@@ -981,8 +1153,8 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
                       <tr>
                         <td colSpan={6} className="p-xl text-center">Loading files...</td>
                       </tr>
-                    ) : documents && documents.length > 0 ? (
-                      documents.map((doc) => {
+                    ) : visibleCompanyDocuments.length > 0 ? (
+                      visibleCompanyDocuments.map((doc) => {
                         const isExpired = doc.expiry_date && new Date(doc.expiry_date) < new Date();
                         const isSoon = doc.expiry_date && !isExpired && new Date(doc.expiry_date) < new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
 
@@ -1322,6 +1494,21 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
                   {prosList?.map((pro: any) => (
                     <option key={pro.id} value={pro.name}>
                       {pro.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-label-md text-on-surface-variant mb-1">Company Group (Optional)</label>
+                <select
+                  className="w-full px-4 py-2 border border-border-subtle rounded-lg text-sm bg-white focus:outline-primary"
+                  {...registerCompany('group_id')}
+                >
+                  <option value="">Standalone Company (No Group)</option>
+                  {groupsList?.map((group: any) => (
+                    <option key={group.id} value={group.id}>
+                      {group.name}
                     </option>
                   ))}
                 </select>
