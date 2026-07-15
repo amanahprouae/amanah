@@ -8,9 +8,15 @@ import { supabase } from '@/lib/supabase';
 export default function SettingsPage() {
   const queryClient = useQueryClient();
   const [newProName, setNewProName] = useState('');
+  
+  const [sysName, setSysName] = useState('UAE PRO Services Portal');
+  const [alertEmail, setAlertEmail] = useState('alerts@proportal.ae');
+  const [gracePeriod, setGracePeriod] = useState(30);
+  const [whatsappNum, setWhatsappNum] = useState('+971 50 000 0000');
+  const [phoneNum, setPhoneNum] = useState('+971 4 000 0000');
 
   // Fetch PROs
-  const { data: pros, isLoading } = useQuery({
+  const { data: pros, isLoading: isProsLoading } = useQuery({
     queryKey: ['all-pros'],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -20,6 +26,47 @@ export default function SettingsPage() {
       if (error) throw error;
       return data || [];
     },
+  });
+
+  // Fetch App Settings
+  const { isLoading: isSettingsLoading } = useQuery({
+    queryKey: ['app-settings'],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('app_settings').select('*');
+      if (error && error.code !== 'PGRST205') throw error; // Ignore if table doesn't exist yet
+      
+      if (data) {
+        data.forEach(setting => {
+          if (setting.key === 'support_whatsapp') setWhatsappNum(setting.value);
+          if (setting.key === 'support_phone') setPhoneNum(setting.value);
+          if (setting.key === 'system_name') setSysName(setting.value);
+          if (setting.key === 'alert_email') setAlertEmail(setting.value);
+          if (setting.key === 'grace_period') setGracePeriod(parseInt(setting.value) || 30);
+        });
+      }
+      return data || [];
+    },
+  });
+
+  const saveSettingsMutation = useMutation({
+    mutationFn: async () => {
+      const settings = [
+        { key: 'support_whatsapp', value: whatsappNum },
+        { key: 'support_phone', value: phoneNum },
+        { key: 'system_name', value: sysName },
+        { key: 'alert_email', value: alertEmail },
+        { key: 'grace_period', value: gracePeriod.toString() }
+      ];
+      const { error } = await supabase.from('app_settings').upsert(settings);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      alert('Settings saved successfully!');
+      queryClient.invalidateQueries({ queryKey: ['app-settings'] });
+    },
+    onError: (err) => {
+      alert('Failed to save settings. Make sure the database migration was applied. Error: ' + err.message);
+    }
   });
 
   // Add PRO Mutation
@@ -73,7 +120,8 @@ export default function SettingsPage() {
                   <label className="block text-label-md text-on-surface-variant mb-1.5">Portal System Name</label>
                   <input
                     type="text"
-                    defaultValue="UAE PRO Services Portal"
+                    value={sysName}
+                    onChange={(e) => setSysName(e.target.value)}
                     className="w-full px-4 py-2 border border-border-subtle rounded-lg text-sm bg-bg-subtle focus:ring-2 focus:ring-primary"
                   />
                 </div>
@@ -81,7 +129,8 @@ export default function SettingsPage() {
                   <label className="block text-label-md text-on-surface-variant mb-1.5">System Alert Email</label>
                   <input
                     type="email"
-                    defaultValue="alerts@proportal.ae"
+                    value={alertEmail}
+                    onChange={(e) => setAlertEmail(e.target.value)}
                     className="w-full px-4 py-2 border border-border-subtle rounded-lg text-sm bg-bg-subtle focus:ring-2 focus:ring-primary"
                   />
                 </div>
@@ -92,7 +141,8 @@ export default function SettingsPage() {
                   <label className="block text-label-md text-on-surface-variant mb-1.5">Notifications Grace Period (Days)</label>
                   <input
                     type="number"
-                    defaultValue={30}
+                    value={gracePeriod}
+                    onChange={(e) => setGracePeriod(parseInt(e.target.value) || 0)}
                     className="w-full px-4 py-2 border border-border-subtle rounded-lg text-sm bg-bg-subtle focus:ring-2 focus:ring-primary"
                   />
                 </div>
@@ -100,15 +150,32 @@ export default function SettingsPage() {
                   <label className="block text-label-md text-on-surface-variant mb-1.5">Support WhatsApp Number</label>
                   <input
                     type="text"
-                    defaultValue="+971 50 000 0000"
+                    value={whatsappNum}
+                    onChange={(e) => setWhatsappNum(e.target.value)}
+                    className="w-full px-4 py-2 border border-border-subtle rounded-lg text-sm bg-bg-subtle focus:ring-2 focus:ring-primary"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-sm">
+                <div>
+                  <label className="block text-label-md text-on-surface-variant mb-1.5">Support Phone Number</label>
+                  <input
+                    type="text"
+                    value={phoneNum}
+                    onChange={(e) => setPhoneNum(e.target.value)}
                     className="w-full px-4 py-2 border border-border-subtle rounded-lg text-sm bg-bg-subtle focus:ring-2 focus:ring-primary"
                   />
                 </div>
               </div>
 
               <div className="pt-4 flex justify-end">
-                <button className="px-lg py-2 bg-primary text-white rounded-lg text-sm font-semibold hover:brightness-110 transition-colors cursor-pointer">
-                  Save Configurations
+                <button 
+                  onClick={() => saveSettingsMutation.mutate()}
+                  disabled={saveSettingsMutation.isPending}
+                  className="px-lg py-2 bg-primary text-white rounded-lg text-sm font-semibold hover:brightness-110 transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  {saveSettingsMutation.isPending ? 'Saving...' : 'Save Configurations'}
                 </button>
               </div>
             </div>
@@ -147,7 +214,7 @@ export default function SettingsPage() {
 
               {/* PROs List */}
               <div className="border border-border-subtle rounded-xl overflow-hidden max-h-[300px] overflow-y-auto custom-scrollbar">
-                {isLoading ? (
+                {isProsLoading ? (
                   <p className="p-4 text-center text-sm text-on-surface-variant animate-pulse">Loading PROs...</p>
                 ) : pros && pros.length > 0 ? (
                   <ul className="divide-y divide-border-subtle">
