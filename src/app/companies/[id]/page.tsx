@@ -95,6 +95,9 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
   const [documentsSort, setDocumentsSort] = useState<'alpha' | 'created' | 'expiry'>('alpha');
   const [employeesSort, setEmployeesSort] = useState<'alpha' | 'created' | 'visa_expiry' | 'passport_expiry'>('alpha');
   const [empDocsSort, setEmpDocsSort] = useState<'alpha' | 'created' | 'expiry'>('alpha');
+  const [documentsSortDir, setDocumentsSortDir] = useState<'asc' | 'desc'>('asc');
+  const [employeesSortDir, setEmployeesSortDir] = useState<'asc' | 'desc'>('asc');
+  const [empDocsSortDir, setEmpDocsSortDir] = useState<'asc' | 'desc'>('asc');
 
   const {
     register: registerEmployee,
@@ -468,10 +471,11 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
   });
 
   const sortedEmployees = (employees || []).slice().sort((a: any, b: any) => {
-    if (employeesSort === 'alpha') return `${a.first_name} ${a.last_name}`.localeCompare(`${b.first_name} ${b.last_name}`);
-    if (employeesSort === 'visa_expiry') return (a.visa_expiry ? Date.parse(a.visa_expiry) : 0) - (b.visa_expiry ? Date.parse(b.visa_expiry) : 0);
-    if (employeesSort === 'passport_expiry') return (a.passport_expiry ? Date.parse(a.passport_expiry) : 0) - (b.passport_expiry ? Date.parse(b.passport_expiry) : 0);
-    return (Date.parse(a.created_at || '') || 0) - (Date.parse(b.created_at || '') || 0);
+    const dir = employeesSortDir === 'asc' ? 1 : -1;
+    if (employeesSort === 'alpha') return `${a.first_name} ${a.last_name}`.localeCompare(`${b.first_name} ${b.last_name}`) * dir;
+    if (employeesSort === 'visa_expiry') return ((a.visa_expiry ? Date.parse(a.visa_expiry) : 0) - (b.visa_expiry ? Date.parse(b.visa_expiry) : 0)) * dir;
+    if (employeesSort === 'passport_expiry') return ((a.passport_expiry ? Date.parse(a.passport_expiry) : 0) - (b.passport_expiry ? Date.parse(b.passport_expiry) : 0)) * dir;
+    return ((Date.parse(a.created_at || '') || 0) - (Date.parse(b.created_at || '') || 0)) * dir;
   });
 
   // Fetch Document Categories
@@ -583,10 +587,11 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
   };
 
   const sortedVisibleDocuments = (visibleCompanyDocuments || []).slice().sort((a: any, b: any) => {
-    if (documentsSort === 'alpha') return (a.file_name || '').localeCompare(b.file_name || '');
-    if (documentsSort === 'expiry') return (a.expiry_date ? Date.parse(a.expiry_date) : 0) - (b.expiry_date ? Date.parse(b.expiry_date) : 0);
+    const dir = documentsSortDir === 'asc' ? 1 : -1;
+    if (documentsSort === 'alpha') return (a.file_name || '').localeCompare(b.file_name || '') * dir;
+    if (documentsSort === 'expiry') return (((a.expiry_date ? Date.parse(a.expiry_date) : 0) - (b.expiry_date ? Date.parse(b.expiry_date) : 0))) * dir;
     // created
-    return (Date.parse(a.uploaded_at || a.created_at || a.issue_date || '') || 0) - (Date.parse(b.uploaded_at || b.created_at || b.issue_date || '') || 0);
+    return (((Date.parse(a.uploaded_at || a.created_at || a.issue_date || '') || 0) - (Date.parse(b.uploaded_at || b.created_at || b.issue_date || '') || 0))) * dir;
   });
   const documentFilterLabel =
     company?.entity_type === 'individual'
@@ -878,9 +883,10 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
   });
 
   const sortedEmpDocs = (empDocs || []).slice().sort((a: any, b: any) => {
-    if (empDocsSort === 'alpha') return (a.file_name || '').localeCompare(b.file_name || '');
-    if (empDocsSort === 'expiry') return (a.expiry_date ? Date.parse(a.expiry_date) : 0) - (b.expiry_date ? Date.parse(b.expiry_date) : 0);
-    return (Date.parse(a.uploaded_at || a.created_at || a.issue_date || '') || 0) - (Date.parse(b.uploaded_at || b.created_at || b.issue_date || '') || 0);
+    const dir = empDocsSortDir === 'asc' ? 1 : -1;
+    if (empDocsSort === 'alpha') return (a.file_name || '').localeCompare(b.file_name || '') * dir;
+    if (empDocsSort === 'expiry') return ((a.expiry_date ? Date.parse(a.expiry_date) : 0) - (b.expiry_date ? Date.parse(b.expiry_date) : 0)) * dir;
+    return ((Date.parse(a.uploaded_at || a.created_at || a.issue_date || '') || 0) - (Date.parse(b.uploaded_at || b.created_at || b.issue_date || '') || 0)) * dir;
   });
 
   // Delete Employee Action
@@ -1320,15 +1326,24 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
                   )}
                 </div>
                 <div className="flex items-center gap-sm">
-                  <select
-                    value={documentsSort}
-                    onChange={(e) => setDocumentsSort(e.target.value as any)}
-                    className="bg-white border border-border-subtle rounded-lg px-2 py-1 text-xs"
-                  >
-                    <option value="alpha">Alphabetical</option>
-                    <option value="created">Date Created</option>
-                    <option value="expiry">Expiry Date</option>
-                  </select>
+                  <div className="flex items-center gap-2">
+                    <select
+                      value={documentsSort}
+                      onChange={(e) => setDocumentsSort(e.target.value as any)}
+                      className="bg-white border border-border-subtle rounded-lg px-2 py-1 text-xs"
+                    >
+                      <option value="alpha">Alphabetical</option>
+                      <option value="created">Date Created</option>
+                      <option value="expiry">Expiry Date</option>
+                    </select>
+                    <button
+                      onClick={() => setDocumentsSortDir(documentsSortDir === 'asc' ? 'desc' : 'asc')}
+                      className="px-2 py-1 bg-white border border-border-subtle rounded-lg text-xs"
+                      title="Toggle sort direction"
+                    >
+                      {documentsSortDir === 'asc' ? 'Asc' : 'Desc'}
+                    </button>
+                  </div>
                   {documentSummaryFilter !== 'all' && (
                     <button
                       onClick={() => setDocumentSummaryFilter('all')}
@@ -1447,16 +1462,25 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
                   {company?.entity_type === 'individual' ? 'Family Members / Relatives' : 'Employee Roster'}
                 </h3>
                 <div className="flex items-center gap-sm">
-                  <select
-                    value={employeesSort}
-                    onChange={(e) => setEmployeesSort(e.target.value as any)}
-                    className="bg-white border border-border-subtle rounded-lg px-2 py-1 text-xs"
-                  >
-                    <option value="alpha">Alphabetical</option>
-                    <option value="created">Date Created</option>
-                    <option value="visa_expiry">Visa Expiry</option>
-                    <option value="passport_expiry">Passport Expiry</option>
-                  </select>
+                  <div className="flex items-center gap-2">
+                    <select
+                      value={employeesSort}
+                      onChange={(e) => setEmployeesSort(e.target.value as any)}
+                      className="bg-white border border-border-subtle rounded-lg px-2 py-1 text-xs"
+                    >
+                      <option value="alpha">Alphabetical</option>
+                      <option value="created">Date Created</option>
+                      <option value="visa_expiry">Visa Expiry</option>
+                      <option value="passport_expiry">Passport Expiry</option>
+                    </select>
+                    <button
+                      onClick={() => setEmployeesSortDir(employeesSortDir === 'asc' ? 'desc' : 'asc')}
+                      className="px-2 py-1 bg-white border border-border-subtle rounded-lg text-xs"
+                      title="Toggle sort direction"
+                    >
+                      {employeesSortDir === 'asc' ? 'Asc' : 'Desc'}
+                    </button>
+                  </div>
                   <button
                     onClick={() => setIsEmployeeModalOpen(true)}
                     className="px-md py-1.5 bg-primary text-white text-xs font-semibold rounded-lg hover:brightness-110 cursor-pointer"
@@ -2261,15 +2285,24 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
 
                 <div className="flex items-center justify-between">
                   <div />
-                  <select
-                    value={empDocsSort}
-                    onChange={(e) => setEmpDocsSort(e.target.value as any)}
-                    className="bg-white border border-border-subtle rounded-lg px-2 py-1 text-xs"
-                  >
-                    <option value="alpha">Alphabetical</option>
-                    <option value="created">Date Created</option>
-                    <option value="expiry">Expiry Date</option>
-                  </select>
+                  <div className="flex items-center gap-2">
+                    <select
+                      value={empDocsSort}
+                      onChange={(e) => setEmpDocsSort(e.target.value as any)}
+                      className="bg-white border border-border-subtle rounded-lg px-2 py-1 text-xs"
+                    >
+                      <option value="alpha">Alphabetical</option>
+                      <option value="created">Date Created</option>
+                      <option value="expiry">Expiry Date</option>
+                    </select>
+                    <button
+                      onClick={() => setEmpDocsSortDir(empDocsSortDir === 'asc' ? 'desc' : 'asc')}
+                      className="px-2 py-1 bg-white border border-border-subtle rounded-lg text-xs"
+                      title="Toggle sort direction"
+                    >
+                      {empDocsSortDir === 'asc' ? 'Asc' : 'Desc'}
+                    </button>
+                  </div>
                 </div>
 
                 <div className="border border-border-subtle rounded-xl overflow-hidden bg-bg-subtle">
