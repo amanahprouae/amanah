@@ -216,59 +216,24 @@ export default function DashboardPage() {
         </div>
 
         {/* Charts and Main Grid */}
-        <div className="grid grid-cols-12 gap-lg">
-          {/* Compliance and Quick Actions (Left 3/12) */}
-          <div className="col-span-12 lg:col-span-3 space-y-lg">
-            {/* Compliance Donut */}
-            <div className="bg-white p-lg rounded-2xl border border-border-subtle shadow-sm text-center">
-              <h3 className="font-title-md text-title-md text-on-surface mb-lg">Compliance Overview</h3>
-              <div className="relative w-40 h-40 mx-auto flex items-center justify-center">
+        <div className="space-y-lg">
+          {/* Charts Row */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-lg">
+            {/* Compliance Overview */}
+            <div className="bg-white p-lg rounded-2xl border border-border-subtle shadow-sm text-center flex flex-col justify-between h-[280px]">
+              <h3 className="font-title-md text-title-md text-on-surface">Compliance Overview</h3>
+              <div className="relative w-36 h-36 mx-auto flex items-center justify-center">
                 <svg className="w-full h-full -rotate-90">
-                  <circle cx="80" cy="80" fill="transparent" r="70" stroke="#F1F5F9" strokeWidth="12"></circle>
-                  <circle cx="80" cy="80" fill="transparent" r="70" stroke="#10B981" strokeDasharray="440" strokeDashoffset={440 - (440 * (stats?.complianceRate ?? 100)) / 100} strokeWidth="12" strokeLinecap="round"></circle>
+                  <circle cx="72" cy="72" fill="transparent" r="62" stroke="#F1F5F9" strokeWidth="10"></circle>
+                  <circle cx="72" cy="72" fill="transparent" r="62" stroke="#10B981" strokeDasharray="390" strokeDashoffset={390 - (390 * (stats?.complianceRate ?? 100)) / 100} strokeWidth="10" strokeLinecap="round"></circle>
                 </svg>
                 <div className="absolute inset-0 flex flex-col items-center justify-center">
                   <span className="text-3xl font-extrabold text-on-surface">{statsLoading ? '...' : `${stats?.complianceRate}%`}</span>
-                  <span className="font-label-sm text-label-sm text-success">Compliant</span>
+                  <span className="font-label-sm text-label-sm text-success font-bold">Compliant</span>
                 </div>
               </div>
-              <p className="mt-lg font-body-sm text-body-sm text-on-surface-variant">Across all entities</p>
+              <p className="font-body-sm text-body-sm text-on-surface-variant">Across all UAE entities</p>
             </div>
-
-            {/* Quick Actions */}
-            <div className="space-y-sm">
-              <h3 className="font-title-md text-title-md text-on-surface px-1">Quick Actions</h3>
-              <button className="w-full p-lg bg-white border border-border-subtle rounded-2xl flex items-center gap-4 hover:border-primary group transition-all text-left">
-                <div className="w-12 h-12 rounded-xl bg-primary-container/10 flex items-center justify-center text-primary group-hover:bg-primary group-hover:text-white transition-all shrink-0">
-                  <span className="material-symbols-outlined">add_business</span>
-                </div>
-                <span className="font-title-md text-title-md text-on-surface">Add Company</span>
-              </button>
-              <button className="w-full p-lg bg-white border border-border-subtle rounded-2xl flex items-center gap-4 hover:border-primary group transition-all text-left">
-                <div className="w-12 h-12 rounded-xl bg-primary-container/10 flex items-center justify-center text-primary group-hover:bg-primary group-hover:text-white transition-all shrink-0">
-                  <span className="material-symbols-outlined">person_add</span>
-                </div>
-                <span className="font-title-md text-title-md text-on-surface">Add Employee</span>
-              </button>
-              <button className="w-full p-lg bg-white border border-border-subtle rounded-2xl flex items-center gap-4 hover:border-primary group transition-all text-left">
-                <div className="w-12 h-12 rounded-xl bg-primary-container/10 flex items-center justify-center text-primary group-hover:bg-primary group-hover:text-white transition-all shrink-0">
-                  <span className="material-symbols-outlined">cloud_upload</span>
-                </div>
-                <span className="font-title-md text-title-md text-on-surface">Upload Document</span>
-              </button>
-              <button className="w-full p-lg bg-white border border-border-subtle rounded-2xl flex items-center gap-4 hover:border-primary group transition-all text-left">
-                <div className="w-12 h-12 rounded-xl bg-primary-container/10 flex items-center justify-center text-primary group-hover:bg-primary group-hover:text-white transition-all shrink-0">
-                  <span className="material-symbols-outlined">send</span>
-                </div>
-                <span className="font-title-md text-title-md text-on-surface">Send Reminder</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Main Content (Right 9/12) */}
-          <div className="col-span-12 lg:col-span-9 space-y-lg">
-            {/* Charts Row */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-lg">
               {/* Renewal Trends Line Chart */}
               <div className="bg-white p-lg rounded-2xl border border-border-subtle shadow-sm flex flex-col h-[280px]">
                 <div className="flex justify-between items-center mb-lg">
@@ -383,7 +348,6 @@ export default function DashboardPage() {
                 <div className="absolute inset-0 bg-gradient-to-r from-inverse-surface via-inverse-surface/40 to-transparent"></div>
               </div>
             </div>
-          </div>
         </div>
       </div>
     </AdminLayout>

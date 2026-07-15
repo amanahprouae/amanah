@@ -47,13 +47,14 @@ export default function DocumentsPage() {
       const cDocs = (companyDocsRes.data || []).map((doc) => ({
         id: doc.id,
         file_name: doc.file_name,
-        category: doc.document_categories?.name || 'Other',
+         category: doc.document_categories?.name || 'Other',
         categoryId: doc.document_categories?.id,
         companyName: doc.companies?.name || 'N/A',
         companyId: doc.company_id,
         ownerType: 'Company Level',
         ownerName: doc.companies?.name || 'N/A',
         size_bytes: doc.size_bytes,
+        issue_date: doc.issue_date,
         expiry_date: doc.expiry_date,
         status: doc.status,
         dbTable: 'company_documents',
@@ -70,6 +71,7 @@ export default function DocumentsPage() {
         ownerType: 'Employee Level',
         ownerName: doc.employees ? `${doc.employees.first_name} ${doc.employees.last_name}` : 'N/A',
         size_bytes: doc.size_bytes,
+        issue_date: doc.issue_date,
         expiry_date: doc.expiry_date,
         status: doc.status,
         dbTable: 'employee_documents',
@@ -208,9 +210,12 @@ export default function DocumentsPage() {
                         </td>
                         <td className="p-lg text-on-surface-variant">{(doc.size_bytes / (1024 * 1024)).toFixed(2)} MB</td>
                         <td className="p-lg">
-                          <span className={isExpired ? 'text-danger font-bold' : isSoon ? 'text-warning font-bold' : 'text-on-surface'}>
-                            {doc.expiry_date ? new Date(doc.expiry_date).toLocaleDateString() : 'No Expiry'}
-                          </span>
+                          <div className="flex flex-col text-xs text-on-surface-variant font-medium">
+                            <span>Issue: {doc.issue_date ? new Date(doc.issue_date).toLocaleDateString() : 'N/A'}</span>
+                            <span className={isExpired ? 'text-danger font-bold' : isSoon ? 'text-warning font-bold' : 'text-on-surface'}>
+                              Expiry: {doc.expiry_date ? new Date(doc.expiry_date).toLocaleDateString() : 'No Expiry'}
+                            </span>
+                          </div>
                         </td>
                         <td className="p-lg text-center">
                           <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase ${

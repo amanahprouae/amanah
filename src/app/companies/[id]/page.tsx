@@ -7,6 +7,7 @@ import { supabase } from '@/lib/supabase';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as zod from 'zod';
+import { useAuth } from '@/components/providers';
 
 const employeeSchema = zod.object({
   first_name: zod.string().min(2, { message: 'First name is required' }),
@@ -15,21 +16,46 @@ const employeeSchema = zod.object({
   phone: zod.string().or(zod.string().length(0)).optional(),
   designation: zod.string().min(2, { message: 'Designation is required' }),
   labor_card_number: zod.string().optional(),
+  labor_card_issue: zod.string().optional(),
   labor_card_expiry: zod.string().optional(),
   visa_number: zod.string().optional(),
+  visa_issue: zod.string().optional(),
   visa_expiry: zod.string().optional(),
   passport_number: zod.string().optional(),
+  passport_issue: zod.string().optional(),
   passport_expiry: zod.string().optional(),
 });
 
 type EmployeeFormFields = zod.infer<typeof employeeSchema>;
 
+const companyEditSchema = zod.object({
+  name: zod.string().min(2, { message: 'Company name must be at least 2 characters' }),
+  trade_license_number: zod.string().min(2, { message: 'Trade license is required' }),
+  trade_license_issue: zod.string().refine((val) => !val || !isNaN(Date.parse(val)), {
+    message: 'Valid issue date is required',
+  }).optional(),
+  trade_license_expiry: zod.string().refine((val) => !isNaN(Date.parse(val)), {
+    message: 'Valid expiry date is required',
+  }),
+  vat_number: zod.string().or(zod.string().length(0)).optional(),
+  subscription_plan: zod.string().or(zod.string().length(0)).optional(),
+  assigned_pro: zod.string().or(zod.string().length(0)).optional(),
+  email: zod.string().email({ message: 'Invalid email address' }).or(zod.string().length(0)).optional(),
+  phone: zod.string().or(zod.string().length(0)).optional(),
+});
+
+type CompanyEditFormFields = zod.infer<typeof companyEditSchema>;
+
 export default function CompanyDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id: companyId } = use(params);
   const queryClient = useQueryClient();
+  const { profile } = useAuth();
   const [activeTab, setActiveTab] = useState<'overview' | 'documents' | 'employees' | 'renewals' | 'activity'>('overview');
   const [isEmployeeModalOpen, setIsEmployeeModalOpen] = useState(false);
   const [isDocModalOpen, setIsDocModalOpen] = useState(false);
+  const [isEditCompanyModalOpen, setIsEditCompanyModalOpen] = useState(false);
+  const [isEditEmployeeModalOpen, setIsEditEmployeeModalOpen] = useState(false);
+  const [editingEmployeeId, setEditingEmployeeId] = useState<string | null>(null);
 
   const {
     register: registerEmployee,
@@ -39,6 +65,269 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
   } = useForm<EmployeeFormFields>({
     resolver: zodResolver(employeeSchema),
   });
+
+  const {
+    register: registerEditEmployee,
+    handleSubmit: handleSubmitEditEmployee,
+    reset: resetEditEmployee,
+    formState: { errors: editEmployeeErrors },
+  } = useForm<EmployeeFormFields>({
+    resolver: zodResolver(employeeSchema),
+  });
+
+  const {
+    register: registerCompany,
+    handleSubmit: handleSubmitCompany,
+    reset: resetCompany,
+    formState: { errors: companyErrors },
+  } = useForm<CompanyEditFormFields>({
+    resolver: zodResolver(companyEditSchema),
+  });
+
+  const updateCompanyMutation = useMutation({
+    mutationFn: async (fields: CompanyEditFormFields) => {
+      const { data, error } = await supabase
+        .from('companies')
+        .update({
+          name: fields.name,
+          trade_license_number: fields.trade_license_number,
+          trade_license_issue: fields.trade_license_issue || null,
+          trade_license_expiry: fields.trade_license_expiry,
+          vat_number: fields.vat_number || null,
+          subscription_plan: fields.subscription_plan || null,
+          assigned_pro: fields.assigned_pro || null,
+          email: fields.email || null,
+          phone: fields.phone || null,
+        })
+        .eq('id', companyId)
+        .select()
+        .single();
+      if (error) throw error;
+
+      // Log activity
+      await supabase.from('activity_logs').insert([
+        {
+          user_id: profile?.id || null,
+          action: 'COMPANY_UPDATED',
+          details: `Updated details for company: ${fields.name}`,
+        },
+      ]);
+
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['company-details', companyId] });
+      setIsEditCompanyModalOpen(false);
+    },
+  });
+
+  const handleOpenEditModal = () => {
+    if (company) {
+      resetCompany({
+        name: company.name,
+        trade_license_number: company.trade_license_number || '',
+        trade_license_issue: company.trade_license_issue || '',
+        trade_license_expiry: company.trade_license_expiry || '',
+        vat_number: company.vat_number || '',
+        subscription_plan: company.subscription_plan || 'Standard',
+        assigned_pro: company.assigned_pro || '',
+        email: company.email || '',
+        phone: company.phone || '',
+      });
+      setIsEditCompanyModalOpen(true);
+    }
+  };
+
+  // Edit Document state
+  const [isEditDocModalOpen, setIsEditDocModalOpen] = useState(false);
+  const [editingDoc, setEditingDoc] = useState<any | null>(null);
+  const [editDocName, setEditDocName] = useState('');
+  const [editDocIssue, setEditDocIssue] = useState('');
+  const [editDocExpiry, setEditDocExpiry] = useState('');
+  const [editDocCategory, setEditDocCategory] = useState('');
+
+  // Edit Employee Document state
+  const [isEditEmpDocModalOpen, setIsEditEmpDocModalOpen] = useState(false);
+  const [editingEmpDoc, setEditingEmpDoc] = useState<any | null>(null);
+  const [editEmpDocName, setEditEmpDocName] = useState('');
+  const [editEmpDocIssue, setEditEmpDocIssue] = useState('');
+  const [editEmpDocExpiry, setEditEmpDocExpiry] = useState('');
+  const [editEmpDocCategory, setEditEmpDocCategory] = useState('');
+
+  // Update Company Document Mutation
+  const updateDocMutation = useMutation({
+    mutationFn: async (fields: { id: string; file_name: string; issue_date: string | null; expiry_date: string | null; category_id: string }) => {
+      let status = 'active';
+      if (fields.expiry_date) {
+        const exp = new Date(fields.expiry_date);
+        const now = new Date();
+        const soon = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+        if (exp < now) {
+          status = 'expired';
+        } else if (exp < soon) {
+          status = 'expiring_soon';
+        }
+      }
+      const { data, error } = await supabase
+        .from('company_documents')
+        .update({
+          file_name: fields.file_name,
+          issue_date: fields.issue_date || null,
+          expiry_date: fields.expiry_date || null,
+          category_id: fields.category_id,
+          status,
+        })
+        .eq('id', fields.id)
+        .select();
+      if (error) throw error;
+
+      // Log activity
+      await supabase.from('activity_logs').insert([
+        {
+          user_id: profile?.id || null,
+          action: 'COMPANY_DOCUMENT_UPDATED',
+          details: `Updated company document: ${fields.file_name}`,
+        },
+      ]);
+
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['company-documents', companyId] });
+      setIsEditDocModalOpen(false);
+      setEditingDoc(null);
+    },
+  });
+
+  // Update Employee Document Mutation
+  const updateEmpDocMutation = useMutation({
+    mutationFn: async (fields: { id: string; file_name: string; issue_date: string | null; expiry_date: string | null; category_id: string }) => {
+      let status = 'active';
+      if (fields.expiry_date) {
+        const exp = new Date(fields.expiry_date);
+        const now = new Date();
+        const soon = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+        if (exp < now) {
+          status = 'expired';
+        } else if (exp < soon) {
+          status = 'expiring_soon';
+        }
+      }
+      const { data, error } = await supabase
+        .from('employee_documents')
+        .update({
+          file_name: fields.file_name,
+          issue_date: fields.issue_date || null,
+          expiry_date: fields.expiry_date || null,
+          category_id: fields.category_id,
+          status,
+        })
+        .eq('id', fields.id)
+        .select();
+      if (error) throw error;
+
+      // Log activity
+      await supabase.from('activity_logs').insert([
+        {
+          user_id: profile?.id || null,
+          action: 'EMPLOYEE_DOCUMENT_UPDATED',
+          details: `Updated employee document: ${fields.file_name}`,
+        },
+      ]);
+
+      return data;
+    },
+    onSuccess: () => {
+      if (managedEmployee) {
+        queryClient.invalidateQueries({ queryKey: ['employee-documents', managedEmployee.id] });
+      }
+      setIsEditEmpDocModalOpen(false);
+      setEditingEmpDoc(null);
+    },
+  });
+
+  const handleOpenEditDocModal = (doc: any) => {
+    setEditingDoc(doc);
+    setEditDocName(doc.file_name);
+    setEditDocIssue(doc.issue_date || '');
+    setEditDocExpiry(doc.expiry_date || '');
+    setEditDocCategory(doc.category_id || '');
+    setIsEditDocModalOpen(true);
+  };
+
+  const handleOpenEditEmpDocModal = (doc: any) => {
+    setEditingDoc(doc); // store general ref
+    setEditingEmpDoc(doc);
+    setEditEmpDocName(doc.file_name);
+    setEditEmpDocIssue(doc.issue_date || '');
+    setEditEmpDocExpiry(doc.expiry_date || '');
+    setEditEmpDocCategory(doc.category_id || '');
+    setIsEditEmpDocModalOpen(true);
+  };
+
+  const updateEmployeeMutation = useMutation({
+    mutationFn: async (fields: EmployeeFormFields & { id: string }) => {
+      const { data, error } = await supabase
+        .from('employees')
+        .update({
+          first_name: fields.first_name,
+          last_name: fields.last_name,
+          email: fields.email || null,
+          phone: fields.phone || null,
+          designation: fields.designation,
+          labor_card_number: fields.labor_card_number || null,
+          labor_card_issue: fields.labor_card_issue || null,
+          labor_card_expiry: fields.labor_card_expiry || null,
+          visa_number: fields.visa_number || null,
+          visa_issue: fields.visa_issue || null,
+          visa_expiry: fields.visa_expiry || null,
+          passport_number: fields.passport_number || null,
+          passport_issue: fields.passport_issue || null,
+          passport_expiry: fields.passport_expiry || null,
+        })
+        .eq('id', fields.id)
+        .select()
+        .single();
+      if (error) throw error;
+
+      // Log activity
+      await supabase.from('activity_logs').insert([
+        {
+          user_id: profile?.id || null,
+          action: 'EMPLOYEE_UPDATED',
+          details: `Updated employee profile: ${fields.first_name} ${fields.last_name}`,
+        },
+      ]);
+
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['company-employees', companyId] });
+      setIsEditEmployeeModalOpen(false);
+      setEditingEmployeeId(null);
+    },
+  });
+
+  const handleOpenEditEmployeeModal = (emp: any) => {
+    setEditingEmployeeId(emp.id);
+    resetEditEmployee({
+      first_name: emp.first_name,
+      last_name: emp.last_name,
+      email: emp.email || '',
+      phone: emp.phone || '',
+      designation: emp.designation || '',
+      labor_card_number: emp.labor_card_number || '',
+      labor_card_issue: emp.labor_card_issue || '',
+      labor_card_expiry: emp.labor_card_expiry || '',
+      visa_number: emp.visa_number || '',
+      visa_issue: emp.visa_issue || '',
+      visa_expiry: emp.visa_expiry || '',
+      passport_number: emp.passport_number || '',
+      passport_issue: emp.passport_issue || '',
+      passport_expiry: emp.passport_expiry || '',
+    });
+    setIsEditEmployeeModalOpen(true);
+  };
 
   // Fetch Company Details
   const { data: company, isLoading: isCompanyLoading } = useQuery({
@@ -51,6 +340,19 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
         .single();
       if (error) throw error;
       return data;
+    },
+  });
+
+  // Fetch PROs list
+  const { data: prosList } = useQuery({
+    queryKey: ['all-pros'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('pros')
+        .select('*')
+        .order('name');
+      if (error) throw error;
+      return data || [];
     },
   });
 
@@ -120,15 +422,28 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
           phone: fields.phone || null,
           designation: fields.designation,
           labor_card_number: fields.labor_card_number || null,
+          labor_card_issue: fields.labor_card_issue || null,
           labor_card_expiry: fields.labor_card_expiry || null,
           visa_number: fields.visa_number || null,
+          visa_issue: fields.visa_issue || null,
           visa_expiry: fields.visa_expiry || null,
           passport_number: fields.passport_number || null,
+          passport_issue: fields.passport_issue || null,
           passport_expiry: fields.passport_expiry || null,
           status: 'active',
         },
       ]);
       if (error) throw error;
+
+      // Log activity
+      await supabase.from('activity_logs').insert([
+        {
+          user_id: profile?.id || null,
+          action: 'EMPLOYEE_ADDED',
+          details: `Added new employee: ${fields.first_name} ${fields.last_name}`,
+        },
+      ]);
+
       return data;
     },
     onSuccess: () => {
@@ -141,6 +456,7 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
   // Document Upload State
   const [uploadCategory, setUploadCategory] = useState('');
   const [uploadFileName, setUploadFileName] = useState('');
+  const [uploadIssue, setUploadIssue] = useState('');
   const [uploadExpiry, setUploadExpiry] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -177,6 +493,7 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
           file_name: fileName,
           file_path: filePath,
           size_bytes: selectedFile.size,
+          issue_date: uploadIssue || null,
           expiry_date: uploadExpiry || null,
           status: 'active',
         },
@@ -187,10 +504,20 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
         throw dbError;
       }
 
+      // Log activity
+      await supabase.from('activity_logs').insert([
+        {
+          user_id: profile?.id || null,
+          action: 'COMPANY_DOCUMENT_UPLOADED',
+          details: `Uploaded company document: ${fileName}`,
+        },
+      ]);
+
       queryClient.invalidateQueries({ queryKey: ['company-documents', companyId] });
       setIsDocModalOpen(false);
       setUploadCategory('');
       setUploadFileName('');
+      setUploadIssue('');
       setUploadExpiry('');
       setSelectedFile(null);
     } catch (err: any) {
@@ -246,6 +573,7 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
   const [managedEmployee, setManagedEmployee] = useState<any | null>(null);
   const [empDocCategory, setEmpDocCategory] = useState('');
   const [empDocFileName, setEmpDocFileName] = useState('');
+  const [empDocIssue, setEmpDocIssue] = useState('');
   const [empDocExpiry, setEmpDocExpiry] = useState('');
   const [empDocFile, setEmpDocFile] = useState<File | null>(null);
   const [isUploadingEmpDoc, setIsUploadingEmpDoc] = useState(false);
@@ -310,6 +638,7 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
           file_name: fileName,
           file_path: filePath,
           size_bytes: empDocFile.size,
+          issue_date: empDocIssue || null,
           expiry_date: empDocExpiry || null,
           status: 'active',
         },
@@ -320,9 +649,19 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
         throw dbError;
       }
 
+      // Log activity
+      await supabase.from('activity_logs').insert([
+        {
+          user_id: profile?.id || null,
+          action: 'EMPLOYEE_DOCUMENT_UPLOADED',
+          details: `Uploaded document for employee ${managedEmployee.first_name} ${managedEmployee.last_name}: ${fileName}`,
+        },
+      ]);
+
       queryClient.invalidateQueries({ queryKey: ['employee-documents', managedEmployee.id] });
       setEmpDocCategory('');
       setEmpDocFileName('');
+      setEmpDocIssue('');
       setEmpDocExpiry('');
       setEmpDocFile(null);
       
@@ -419,10 +758,6 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
                 {company.status === 'active' ? 'Active' : 'Disabled'}
               </span>
             </div>
-            <div className="flex items-center gap-sm text-on-surface-variant font-body-md text-sm">
-              <span className="material-symbols-outlined text-sm">location_on</span>
-              <span>Level 14, Al Maqam Tower, Abu Dhabi Global Market, UAE</span>
-            </div>
           </div>
           <div className="flex gap-md">
             <button
@@ -440,7 +775,7 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
               <span>Add Employee</span>
             </button>
             <a
-              href={`mailto:contact@${company.name.toLowerCase().replace(/\s+/g, '')}.ae`}
+              href={`mailto:${company.email || ''}`}
               className="flex items-center gap-2 px-md py-2 bg-primary text-white rounded-lg font-label-md text-label-md hover:brightness-110 transition-all shadow-sm text-xs font-semibold cursor-pointer"
             >
               <span className="material-symbols-outlined text-sm">mail</span>
@@ -475,7 +810,12 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
               <div className="bg-white p-lg border border-border-subtle rounded-2xl shadow-sm">
                 <div className="flex justify-between items-center mb-lg">
                   <h3 className="font-title-lg text-title-lg text-on-surface">Company Information</h3>
-                  <button className="text-primary font-label-md text-label-md font-bold hover:underline">Edit Details</button>
+                  <button
+                    onClick={handleOpenEditModal}
+                    className="text-primary font-label-md text-label-md font-bold hover:underline cursor-pointer"
+                  >
+                    Edit Details
+                  </button>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-y-lg gap-x-xl text-sm">
                   <div>
@@ -483,24 +823,60 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
                     <p className="font-title-md text-on-surface font-semibold">{company.trade_license_number || 'N/A'}</p>
                   </div>
                   <div>
+                    <p className="text-[10px] uppercase font-bold tracking-wider text-on-surface-variant mb-1">Trade License Issue Date</p>
+                    <p className="font-title-md text-on-surface font-semibold">
+                      {company.trade_license_issue ? new Date(company.trade_license_issue).toLocaleDateString() : 'N/A'}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] uppercase font-bold tracking-wider text-on-surface-variant mb-1">Trade License Expiry Date</p>
+                    <p className="font-title-md text-on-surface font-semibold">
+                      {company.trade_license_expiry ? new Date(company.trade_license_expiry).toLocaleDateString() : 'N/A'}
+                    </p>
+                  </div>
+                  <div>
                     <p className="text-[10px] uppercase font-bold tracking-wider text-on-surface-variant mb-1">VAT Number</p>
-                    <p className="font-title-md text-on-surface font-semibold">100239485700003</p>
+                    <p className="font-title-md text-on-surface font-semibold">{company.vat_number || 'N/A'}</p>
                   </div>
                   <div>
                     <p className="text-[10px] uppercase font-bold tracking-wider text-on-surface-variant mb-1">Subscription Plan</p>
-                    <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-secondary-container text-on-secondary-container font-bold text-xs">
-                      <span className="material-symbols-outlined text-sm">workspace_premium</span>
-                      <span>Premium Gold</span>
-                    </span>
+                    {company.subscription_plan === 'Premium Gold' ? (
+                      <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-500/10 text-amber-600 font-bold text-xs">
+                        <span className="material-symbols-outlined text-sm">workspace_premium</span>
+                        <span>Premium Gold</span>
+                      </span>
+                    ) : company.subscription_plan === 'Premium Silver' ? (
+                      <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-400/15 text-slate-600 font-bold text-xs">
+                        <span className="material-symbols-outlined text-sm">workspace_premium</span>
+                        <span>Premium Silver</span>
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-secondary-container text-on-secondary-container font-bold text-xs">
+                        <span className="material-symbols-outlined text-sm">workspace_premium</span>
+                        <span>{company.subscription_plan || 'Standard'}</span>
+                      </span>
+                    )}
                   </div>
                   <div>
                     <p className="text-[10px] uppercase font-bold tracking-wider text-on-surface-variant mb-1">Assigned PRO</p>
-                    <div className="flex items-center gap-sm">
-                      <div className="w-8 h-8 rounded-full bg-primary-container text-white flex items-center justify-center font-bold text-xs">
-                        SJ
+                    {company.assigned_pro ? (
+                      <div className="flex items-center gap-sm">
+                        <div className="w-8 h-8 rounded-full bg-primary-container text-white flex items-center justify-center font-bold text-xs">
+                          {company.assigned_pro.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase()}
+                        </div>
+                        <p className="font-title-md text-on-surface font-semibold">{company.assigned_pro}</p>
                       </div>
-                      <p className="font-title-md text-on-surface font-semibold">Sarah Jenkins</p>
-                    </div>
+                    ) : (
+                      <p className="font-title-md text-on-surface-variant font-medium">N/A</p>
+                    )}
+                  </div>
+                  <div>
+                    <p className="text-[10px] uppercase font-bold tracking-wider text-on-surface-variant mb-1">Client Email</p>
+                    <p className="font-title-md text-on-surface font-semibold">{company.email || 'N/A'}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] uppercase font-bold tracking-wider text-on-surface-variant mb-1">Client Phone</p>
+                    <p className="font-title-md text-on-surface font-semibold">{company.phone || 'N/A'}</p>
                   </div>
                 </div>
               </div>
@@ -616,9 +992,12 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
                             <td className="p-lg text-on-surface-variant font-medium">{doc.document_categories?.name || 'Other'}</td>
                             <td className="p-lg text-on-surface-variant">{(doc.size_bytes / (1024 * 1024)).toFixed(2)} MB</td>
                             <td className="p-lg">
-                              <span className={isExpired ? 'text-danger font-bold' : isSoon ? 'text-warning font-bold' : ''}>
-                                {doc.expiry_date ? new Date(doc.expiry_date).toLocaleDateString() : 'No Expiry'}
-                              </span>
+                              <div className="flex flex-col text-xs text-on-surface-variant font-medium">
+                                <span>Issue: {doc.issue_date ? new Date(doc.issue_date).toLocaleDateString() : 'N/A'}</span>
+                                <span className={isExpired ? 'text-danger font-bold' : isSoon ? 'text-warning font-bold' : ''}>
+                                  Expiry: {doc.expiry_date ? new Date(doc.expiry_date).toLocaleDateString() : 'No Expiry'}
+                                </span>
+                              </div>
                             </td>
                             <td className="p-lg">
                               <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase ${
@@ -636,6 +1015,12 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
                                 className="px-2.5 py-1 text-xs font-semibold border border-border-subtle text-primary rounded-lg hover:bg-primary/5 transition-colors cursor-pointer"
                               >
                                 Open
+                              </button>
+                              <button
+                                onClick={() => handleOpenEditDocModal(doc)}
+                                className="px-2.5 py-1 text-xs font-semibold border border-border-subtle text-on-surface rounded-lg hover:bg-surface-container transition-colors cursor-pointer"
+                              >
+                                Edit
                               </button>
                               <button
                                 onClick={() => {
@@ -728,6 +1113,12 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
                                 Manage Docs
                               </button>
                               <button
+                                onClick={() => handleOpenEditEmployeeModal(emp)}
+                                className="px-2.5 py-1 text-xs font-semibold border border-border-subtle text-on-surface rounded-lg hover:bg-surface-container transition-colors cursor-pointer"
+                              >
+                                Edit
+                              </button>
+                              <button
                                 onClick={() => {
                                   if (confirm(`Are you sure you want to delete employee ${emp.first_name} ${emp.last_name}?`)) {
                                     deleteEmployeeMutation.mutate(emp.id);
@@ -809,6 +1200,157 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
         )}
       </div>
 
+      {/* Edit Company Details Modal */}
+      {isEditCompanyModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white border border-border-subtle rounded-2xl w-full max-w-lg shadow-2xl p-8 animate-in fade-in zoom-in-95 duration-150 max-h-[90vh] overflow-y-auto custom-scrollbar">
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-title-lg font-bold text-on-surface">Edit Company Details</h3>
+              <button
+                onClick={() => {
+                  setIsEditCompanyModalOpen(false);
+                  resetCompany();
+                }}
+                className="p-1 rounded-full hover:bg-surface-container transition-colors cursor-pointer"
+              >
+                <span className="material-symbols-outlined text-on-surface-variant">close</span>
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmitCompany((data) => updateCompanyMutation.mutate(data))} className="space-y-4">
+              <div>
+                <label className="block text-label-md text-on-surface-variant mb-1">Company Name</label>
+                <input
+                  type="text"
+                  className="w-full px-4 py-2 border border-border-subtle rounded-lg text-sm focus:outline-primary"
+                  {...registerCompany('name')}
+                />
+                {companyErrors.name && (
+                  <p className="mt-1 text-danger text-[10px] font-semibold">{companyErrors.name.message}</p>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-label-md text-on-surface-variant mb-1">Trade License No</label>
+                <input
+                  type="text"
+                  className="w-full px-4 py-2 border border-border-subtle rounded-lg text-sm focus:outline-primary"
+                  {...registerCompany('trade_license_number')}
+                />
+                {companyErrors.trade_license_number && (
+                  <p className="mt-1 text-danger text-[10px] font-semibold">{companyErrors.trade_license_number.message}</p>
+                )}
+              </div>
+
+              <div className="grid grid-cols-2 gap-sm">
+                <div>
+                  <label className="block text-label-md text-on-surface-variant mb-1">Trade License Issue</label>
+                  <input
+                    type="date"
+                    className="w-full px-4 py-2 border border-border-subtle rounded-lg text-sm focus:outline-primary"
+                    {...registerCompany('trade_license_issue')}
+                  />
+                  {companyErrors.trade_license_issue && (
+                    <p className="mt-1 text-danger text-[10px] font-semibold">{companyErrors.trade_license_issue.message}</p>
+                  )}
+                </div>
+                <div>
+                  <label className="block text-label-md text-on-surface-variant mb-1">Trade License Expiry</label>
+                  <input
+                    type="date"
+                    className="w-full px-4 py-2 border border-border-subtle rounded-lg text-sm focus:outline-primary"
+                    {...registerCompany('trade_license_expiry')}
+                  />
+                  {companyErrors.trade_license_expiry && (
+                    <p className="mt-1 text-danger text-[10px] font-semibold">{companyErrors.trade_license_expiry.message}</p>
+                  )}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-sm">
+                <div>
+                  <label className="block text-label-md text-on-surface-variant mb-1">VAT Number</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. 100239485700003"
+                    className="w-full px-4 py-2 border border-border-subtle rounded-lg text-sm focus:outline-primary"
+                    {...registerCompany('vat_number')}
+                  />
+                </div>
+                <div>
+                  <label className="block text-label-md text-on-surface-variant mb-1">Subscription Plan</label>
+                  <select
+                    className="w-full px-4 py-2 border border-border-subtle rounded-lg text-sm bg-white focus:outline-primary"
+                    {...registerCompany('subscription_plan')}
+                  >
+                    <option value="Standard">Standard</option>
+                    <option value="Premium Silver">Premium Silver</option>
+                    <option value="Premium Gold">Premium Gold</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-sm">
+                <div>
+                  <label className="block text-label-md text-on-surface-variant mb-1">Contact Email</label>
+                  <input
+                    type="text"
+                    className="w-full px-4 py-2 border border-border-subtle rounded-lg text-sm focus:outline-primary"
+                    {...registerCompany('email')}
+                  />
+                  {companyErrors.email && (
+                    <p className="mt-1 text-danger text-[10px] font-semibold">{companyErrors.email.message}</p>
+                  )}
+                </div>
+                <div>
+                  <label className="block text-label-md text-on-surface-variant mb-1">Contact Phone</label>
+                  <input
+                    type="text"
+                    className="w-full px-4 py-2 border border-border-subtle rounded-lg text-sm focus:outline-primary"
+                    {...registerCompany('phone')}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-label-md text-on-surface-variant mb-1">Assigned PRO</label>
+                <select
+                  className="w-full px-4 py-2 border border-border-subtle rounded-lg text-sm bg-white focus:outline-primary"
+                  {...registerCompany('assigned_pro')}
+                >
+                  <option value="">Unassigned</option>
+                  {prosList?.map((pro: any) => (
+                    <option key={pro.id} value={pro.name}>
+                      {pro.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex gap-sm justify-end pt-4 border-t border-border-subtle">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsEditCompanyModalOpen(false);
+                    resetCompany();
+                  }}
+                  className="px-lg py-2 bg-white border border-border-subtle rounded-lg text-body-sm font-semibold hover:bg-surface-container-low transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={updateCompanyMutation.isPending}
+                  className="px-lg py-2 bg-primary text-white rounded-lg text-body-sm font-semibold hover:brightness-110 disabled:bg-primary/50 transition-all cursor-pointer"
+                >
+                  {updateCompanyMutation.isPending ? 'Saving...' : 'Save Changes'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* Add Employee Modal */}
       {isEmployeeModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
@@ -887,39 +1429,85 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
               <hr className="border-border-subtle my-4" />
               <h4 className="text-xs font-bold text-on-surface-variant uppercase tracking-wider mb-2">Government IDs & Expiries</h4>
 
-              <div className="grid grid-cols-2 gap-sm">
+              {/* Labor Card */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-sm">
+                <div>
+                  <label className="block text-label-md text-on-surface-variant mb-1">Labor Card Number</label>
+                  <input
+                    type="text"
+                    className="w-full px-3 py-2 border border-border-subtle rounded-lg text-xs"
+                    {...registerEmployee('labor_card_number')}
+                  />
+                </div>
+                <div>
+                  <label className="block text-label-md text-on-surface-variant mb-1">Labor Card Issue</label>
+                  <input
+                    type="date"
+                    className="w-full px-3 py-2 border border-border-subtle rounded-lg text-xs"
+                    {...registerEmployee('labor_card_issue')}
+                  />
+                </div>
+                <div>
+                  <label className="block text-label-md text-on-surface-variant mb-1">Labor Card Expiry</label>
+                  <input
+                    type="date"
+                    className="w-full px-3 py-2 border border-border-subtle rounded-lg text-xs"
+                    {...registerEmployee('labor_card_expiry')}
+                  />
+                </div>
+              </div>
+
+              {/* Visa */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-sm">
                 <div>
                   <label className="block text-label-md text-on-surface-variant mb-1">Visa Number</label>
                   <input
                     type="text"
-                    className="w-full px-4 py-2 border border-border-subtle rounded-lg text-xs"
+                    className="w-full px-3 py-2 border border-border-subtle rounded-lg text-xs"
                     {...registerEmployee('visa_number')}
+                  />
+                </div>
+                <div>
+                  <label className="block text-label-md text-on-surface-variant mb-1">Visa Issue</label>
+                  <input
+                    type="date"
+                    className="w-full px-3 py-2 border border-border-subtle rounded-lg text-xs"
+                    {...registerEmployee('visa_issue')}
                   />
                 </div>
                 <div>
                   <label className="block text-label-md text-on-surface-variant mb-1">Visa Expiry</label>
                   <input
                     type="date"
-                    className="w-full px-4 py-2 border border-border-subtle rounded-lg text-xs"
+                    className="w-full px-3 py-2 border border-border-subtle rounded-lg text-xs"
                     {...registerEmployee('visa_expiry')}
                   />
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-sm">
+              {/* Passport */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-sm">
                 <div>
                   <label className="block text-label-md text-on-surface-variant mb-1">Passport Number</label>
                   <input
                     type="text"
-                    className="w-full px-4 py-2 border border-border-subtle rounded-lg text-xs"
+                    className="w-full px-3 py-2 border border-border-subtle rounded-lg text-xs"
                     {...registerEmployee('passport_number')}
+                  />
+                </div>
+                <div>
+                  <label className="block text-label-md text-on-surface-variant mb-1">Passport Issue</label>
+                  <input
+                    type="date"
+                    className="w-full px-3 py-2 border border-border-subtle rounded-lg text-xs"
+                    {...registerEmployee('passport_issue')}
                   />
                 </div>
                 <div>
                   <label className="block text-label-md text-on-surface-variant mb-1">Passport Expiry</label>
                   <input
                     type="date"
-                    className="w-full px-4 py-2 border border-border-subtle rounded-lg text-xs"
+                    className="w-full px-3 py-2 border border-border-subtle rounded-lg text-xs"
                     {...registerEmployee('passport_expiry')}
                   />
                 </div>
@@ -1009,14 +1597,25 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
                 />
               </div>
 
-              <div>
-                <label className="block text-label-md text-on-surface-variant mb-2">Expiry Date (Optional)</label>
-                <input
-                  type="date"
-                  value={uploadExpiry}
-                  onChange={(e) => setUploadExpiry(e.target.value)}
-                  className="w-full px-4 py-2 border border-border-subtle rounded-lg text-sm"
-                />
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-sm">
+                <div>
+                  <label className="block text-label-md text-on-surface-variant mb-2">Issue Date (Optional)</label>
+                  <input
+                    type="date"
+                    value={uploadIssue}
+                    onChange={(e) => setUploadIssue(e.target.value)}
+                    className="w-full px-4 py-2 border border-border-subtle rounded-lg text-sm bg-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-label-md text-on-surface-variant mb-2">Expiry Date (Optional)</label>
+                  <input
+                    type="date"
+                    value={uploadExpiry}
+                    onChange={(e) => setUploadExpiry(e.target.value)}
+                    className="w-full px-4 py-2 border border-border-subtle rounded-lg text-sm bg-white"
+                  />
+                </div>
               </div>
 
               <div className="flex gap-sm justify-end pt-4 border-t border-border-subtle">
@@ -1117,12 +1716,22 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
                   </div>
 
                   <div>
+                    <label className="block text-label-sm text-on-surface-variant mb-1">Issue Date (Optional)</label>
+                    <input
+                      type="date"
+                      value={empDocIssue}
+                      onChange={(e) => setEmpDocIssue(e.target.value)}
+                      className="w-full px-3 py-1.5 border border-border-subtle rounded-lg text-xs bg-white focus:outline-primary"
+                    />
+                  </div>
+
+                  <div>
                     <label className="block text-label-sm text-on-surface-variant mb-1">Expiry Date (Optional)</label>
                     <input
                       type="date"
                       value={empDocExpiry}
                       onChange={(e) => setEmpDocExpiry(e.target.value)}
-                      className="w-full px-3 py-1.5 border border-border-subtle rounded-lg text-xs"
+                      className="w-full px-3 py-1.5 border border-border-subtle rounded-lg text-xs bg-white focus:outline-primary"
                     />
                   </div>
 
@@ -1170,9 +1779,12 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
                                   {doc.document_categories?.name || 'Other'}
                                 </td>
                                 <td className="p-md">
-                                  <span className={isExpired ? 'text-danger font-bold' : isSoon ? 'text-warning font-bold' : ''}>
-                                    {doc.expiry_date ? new Date(doc.expiry_date).toLocaleDateString() : 'No Expiry'}
-                                  </span>
+                                  <div className="flex flex-col text-xs text-on-surface-variant font-medium">
+                                    <span>Issue: {doc.issue_date ? new Date(doc.issue_date).toLocaleDateString() : 'N/A'}</span>
+                                    <span className={isExpired ? 'text-danger font-bold' : isSoon ? 'text-warning font-bold' : ''}>
+                                      Expiry: {doc.expiry_date ? new Date(doc.expiry_date).toLocaleDateString() : 'No Expiry'}
+                                    </span>
+                                  </div>
                                 </td>
                                 <td className="p-md text-right space-x-1 whitespace-nowrap">
                                   <button
@@ -1180,6 +1792,12 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
                                     className="px-2 py-0.5 text-[10px] font-semibold border border-border-subtle text-primary rounded hover:bg-primary/5 transition-colors cursor-pointer"
                                   >
                                     Open
+                                  </button>
+                                  <button
+                                    onClick={() => handleOpenEditEmpDocModal(doc)}
+                                    className="px-2 py-0.5 text-[10px] font-semibold border border-border-subtle text-on-surface rounded hover:bg-surface-container transition-colors cursor-pointer"
+                                  >
+                                    Edit
                                   </button>
                                   <button
                                     onClick={() => {
@@ -1206,6 +1824,398 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
                 </div>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Company Document Modal */}
+      {isEditDocModalOpen && editingDoc && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white border border-border-subtle rounded-2xl w-full max-w-md shadow-2xl p-8 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-title-lg font-bold text-on-surface">Edit Company Document</h3>
+              <button
+                onClick={() => {
+                  setIsEditDocModalOpen(false);
+                  setEditingDoc(null);
+                }}
+                className="p-1 rounded-full hover:bg-surface-container transition-colors cursor-pointer"
+              >
+                <span className="material-symbols-outlined text-on-surface-variant">close</span>
+              </button>
+            </div>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                updateDocMutation.mutate({
+                  id: editingDoc.id,
+                  file_name: editDocName,
+                  issue_date: editDocIssue || null,
+                  expiry_date: editDocExpiry || null,
+                  category_id: editDocCategory,
+                });
+              }}
+              className="space-y-4"
+            >
+              <div>
+                <label className="block text-label-md text-on-surface-variant mb-1">File Name (Display Label)</label>
+                <input
+                  type="text"
+                  required
+                  value={editDocName}
+                  onChange={(e) => setEditDocName(e.target.value)}
+                  className="w-full px-4 py-2 border border-border-subtle rounded-lg text-sm focus:outline-primary"
+                />
+              </div>
+
+              <div>
+                <label className="block text-label-md text-on-surface-variant mb-1">Document Category</label>
+                <select
+                  required
+                  value={editDocCategory}
+                  onChange={(e) => setEditDocCategory(e.target.value)}
+                  className="w-full px-4 py-2 border border-border-subtle rounded-lg text-sm bg-white focus:outline-primary"
+                >
+                  {categories?.filter((cat) => cat.type === 'company').map((cat) => (
+                    <option key={cat.id} value={cat.id}>
+                      {cat.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-sm">
+                <div>
+                  <label className="block text-label-md text-on-surface-variant mb-1">Issue Date (Optional)</label>
+                  <input
+                    type="date"
+                    value={editDocIssue}
+                    onChange={(e) => setEditDocIssue(e.target.value)}
+                    className="w-full px-4 py-2 border border-border-subtle rounded-lg text-sm focus:outline-primary bg-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-label-md text-on-surface-variant mb-1">Expiry Date (Optional)</label>
+                  <input
+                    type="date"
+                    value={editDocExpiry}
+                    onChange={(e) => setEditDocExpiry(e.target.value)}
+                    className="w-full px-4 py-2 border border-border-subtle rounded-lg text-sm focus:outline-primary bg-white"
+                  />
+                </div>
+              </div>
+
+              <div className="flex gap-sm justify-end pt-4 border-t border-border-subtle">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsEditDocModalOpen(false);
+                    setEditingDoc(null);
+                  }}
+                  className="px-lg py-2 bg-white border border-border-subtle rounded-lg text-body-sm font-semibold hover:bg-surface-container-low transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={updateDocMutation.isPending}
+                  className="px-lg py-2 bg-primary text-white rounded-lg text-body-sm font-semibold hover:brightness-110 disabled:bg-primary/50 transition-all cursor-pointer"
+                >
+                  {updateDocMutation.isPending ? 'Saving...' : 'Save Changes'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Employee Document Modal */}
+      {isEditEmpDocModalOpen && editingEmpDoc && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white border border-border-subtle rounded-2xl w-full max-w-md shadow-2xl p-8 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-title-lg font-bold text-on-surface">Edit Employee Document</h3>
+              <button
+                onClick={() => {
+                  setIsEditEmpDocModalOpen(false);
+                  setEditingEmpDoc(null);
+                }}
+                className="p-1 rounded-full hover:bg-surface-container transition-colors cursor-pointer"
+              >
+                <span className="material-symbols-outlined text-on-surface-variant">close</span>
+              </button>
+            </div>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                updateEmpDocMutation.mutate({
+                  id: editingEmpDoc.id,
+                  file_name: editEmpDocName,
+                  issue_date: editEmpDocIssue || null,
+                  expiry_date: editEmpDocExpiry || null,
+                  category_id: editEmpDocCategory,
+                });
+              }}
+              className="space-y-4"
+            >
+              <div>
+                <label className="block text-label-md text-on-surface-variant mb-1">File Name (Display Label)</label>
+                <input
+                  type="text"
+                  required
+                  value={editEmpDocName}
+                  onChange={(e) => setEditEmpDocName(e.target.value)}
+                  className="w-full px-4 py-2 border border-border-subtle rounded-lg text-sm focus:outline-primary"
+                />
+              </div>
+
+              <div>
+                <label className="block text-label-md text-on-surface-variant mb-1">Document Category</label>
+                <select
+                  required
+                  value={editEmpDocCategory}
+                  onChange={(e) => setEditEmpDocCategory(e.target.value)}
+                  className="w-full px-4 py-2 border border-border-subtle rounded-lg text-sm bg-white focus:outline-primary"
+                >
+                  {categories?.filter((cat) => cat.type === 'employee').map((cat) => (
+                    <option key={cat.id} value={cat.id}>
+                      {cat.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-sm">
+                <div>
+                  <label className="block text-label-md text-on-surface-variant mb-1">Issue Date (Optional)</label>
+                  <input
+                    type="date"
+                    value={editEmpDocIssue}
+                    onChange={(e) => setEditEmpDocIssue(e.target.value)}
+                    className="w-full px-4 py-2 border border-border-subtle rounded-lg text-sm focus:outline-primary bg-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-label-md text-on-surface-variant mb-1">Expiry Date (Optional)</label>
+                  <input
+                    type="date"
+                    value={editEmpDocExpiry}
+                    onChange={(e) => setEditEmpDocExpiry(e.target.value)}
+                    className="w-full px-4 py-2 border border-border-subtle rounded-lg text-sm focus:outline-primary bg-white"
+                  />
+                </div>
+              </div>
+
+              <div className="flex gap-sm justify-end pt-4 border-t border-border-subtle">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsEditEmpDocModalOpen(false);
+                    setEditingEmpDoc(null);
+                  }}
+                  className="px-lg py-2 bg-white border border-border-subtle rounded-lg text-body-sm font-semibold hover:bg-surface-container-low transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={updateEmpDocMutation.isPending}
+                  className="px-lg py-2 bg-primary text-white rounded-lg text-body-sm font-semibold hover:brightness-110 disabled:bg-primary/50 transition-all cursor-pointer"
+                >
+                  {updateEmpDocMutation.isPending ? 'Saving...' : 'Save Changes'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Employee Modal */}
+      {isEditEmployeeModalOpen && editingEmployeeId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white border border-border-subtle rounded-2xl w-full max-w-lg shadow-2xl p-8 animate-in fade-in zoom-in-95 duration-150 max-h-[90vh] overflow-y-auto custom-scrollbar">
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-title-lg font-bold text-on-surface">Edit Employee</h3>
+              <button
+                onClick={() => {
+                  setIsEditEmployeeModalOpen(false);
+                  setEditingEmployeeId(null);
+                }}
+                className="p-1 rounded-full hover:bg-surface-container transition-colors cursor-pointer"
+              >
+                <span className="material-symbols-outlined text-on-surface-variant">close</span>
+              </button>
+            </div>
+
+            <form
+              onSubmit={handleSubmitEditEmployee((data) =>
+                updateEmployeeMutation.mutate({ ...data, id: editingEmployeeId })
+              )}
+              className="space-y-4"
+            >
+              <div className="grid grid-cols-2 gap-sm">
+                <div>
+                  <label className="block text-label-md text-on-surface-variant mb-1">First Name</label>
+                  <input
+                    type="text"
+                    className="w-full px-4 py-2 border border-border-subtle rounded-lg text-sm focus:outline-primary"
+                    {...registerEditEmployee('first_name')}
+                  />
+                  {editEmployeeErrors.first_name && (
+                    <p className="mt-1 text-danger text-[10px] font-semibold">{editEmployeeErrors.first_name.message}</p>
+                  )}
+                </div>
+                <div>
+                  <label className="block text-label-md text-on-surface-variant mb-1">Last Name</label>
+                  <input
+                    type="text"
+                    className="w-full px-4 py-2 border border-border-subtle rounded-lg text-sm focus:outline-primary"
+                    {...registerEditEmployee('last_name')}
+                  />
+                  {editEmployeeErrors.last_name && (
+                    <p className="mt-1 text-danger text-[10px] font-semibold">{editEmployeeErrors.last_name.message}</p>
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-label-md text-on-surface-variant mb-1">Designation</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Sales Director"
+                  className="w-full px-4 py-2 border border-border-subtle rounded-lg text-sm focus:outline-primary"
+                  {...registerEditEmployee('designation')}
+                />
+                {editEmployeeErrors.designation && (
+                  <p className="mt-1 text-danger text-[10px] font-semibold">{editEmployeeErrors.designation.message}</p>
+                )}
+              </div>
+
+              <div className="grid grid-cols-2 gap-sm">
+                <div>
+                  <label className="block text-label-md text-on-surface-variant mb-1">Email</label>
+                  <input
+                    type="email"
+                    className="w-full px-4 py-2 border border-border-subtle rounded-lg text-sm focus:outline-primary"
+                    {...registerEditEmployee('email')}
+                  />
+                </div>
+                <div>
+                  <label className="block text-label-md text-on-surface-variant mb-1">Phone</label>
+                  <input
+                    type="text"
+                    className="w-full px-4 py-2 border border-border-subtle rounded-lg text-sm focus:outline-primary"
+                    {...registerEditEmployee('phone')}
+                  />
+                </div>
+              </div>
+
+              {/* Labor Card */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-sm">
+                <div>
+                  <label className="block text-label-md text-on-surface-variant mb-1">Labor Card Number</label>
+                  <input
+                    type="text"
+                    className="w-full px-4 py-2 border border-border-subtle rounded-lg text-sm focus:outline-primary"
+                    {...registerEditEmployee('labor_card_number')}
+                  />
+                </div>
+                <div>
+                  <label className="block text-label-md text-on-surface-variant mb-1">Labor Card Issue</label>
+                  <input
+                    type="date"
+                    className="w-full px-4 py-2 border border-border-subtle rounded-lg text-sm focus:outline-primary"
+                    {...registerEditEmployee('labor_card_issue')}
+                  />
+                </div>
+                <div>
+                  <label className="block text-label-md text-on-surface-variant mb-1">Labor Card Expiry</label>
+                  <input
+                    type="date"
+                    className="w-full px-4 py-2 border border-border-subtle rounded-lg text-sm focus:outline-primary"
+                    {...registerEditEmployee('labor_card_expiry')}
+                  />
+                </div>
+              </div>
+
+              {/* Visa */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-sm">
+                <div>
+                  <label className="block text-label-md text-on-surface-variant mb-1">Visa Number</label>
+                  <input
+                    type="text"
+                    className="w-full px-4 py-2 border border-border-subtle rounded-lg text-sm focus:outline-primary"
+                    {...registerEditEmployee('visa_number')}
+                  />
+                </div>
+                <div>
+                  <label className="block text-label-md text-on-surface-variant mb-1">Visa Issue</label>
+                  <input
+                    type="date"
+                    className="w-full px-4 py-2 border border-border-subtle rounded-lg text-sm focus:outline-primary"
+                    {...registerEditEmployee('visa_issue')}
+                  />
+                </div>
+                <div>
+                  <label className="block text-label-md text-on-surface-variant mb-1">Visa Expiry</label>
+                  <input
+                    type="date"
+                    className="w-full px-4 py-2 border border-border-subtle rounded-lg text-sm focus:outline-primary"
+                    {...registerEditEmployee('visa_expiry')}
+                  />
+                </div>
+              </div>
+
+              {/* Passport */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-sm">
+                <div>
+                  <label className="block text-label-md text-on-surface-variant mb-1">Passport Number</label>
+                  <input
+                    type="text"
+                    className="w-full px-4 py-2 border border-border-subtle rounded-lg text-sm focus:outline-primary"
+                    {...registerEditEmployee('passport_number')}
+                  />
+                </div>
+                <div>
+                  <label className="block text-label-md text-on-surface-variant mb-1">Passport Issue</label>
+                  <input
+                    type="date"
+                    className="w-full px-4 py-2 border border-border-subtle rounded-lg text-sm focus:outline-primary"
+                    {...registerEditEmployee('passport_issue')}
+                  />
+                </div>
+                <div>
+                  <label className="block text-label-md text-on-surface-variant mb-1">Passport Expiry</label>
+                  <input
+                    type="date"
+                    className="w-full px-4 py-2 border border-border-subtle rounded-lg text-sm focus:outline-primary"
+                    {...registerEditEmployee('passport_expiry')}
+                  />
+                </div>
+              </div>
+
+              <div className="flex gap-sm justify-end pt-4 border-t border-border-subtle">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsEditEmployeeModalOpen(false);
+                    setEditingEmployeeId(null);
+                  }}
+                  className="px-lg py-2 bg-white border border-border-subtle rounded-lg text-body-sm font-semibold hover:bg-surface-container-low transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={updateEmployeeMutation.isPending}
+                  className="px-lg py-2 bg-primary text-white rounded-lg text-body-sm font-semibold hover:brightness-110 disabled:bg-primary/50 transition-all cursor-pointer"
+                >
+                  {updateEmployeeMutation.isPending ? 'Saving...' : 'Save Changes'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

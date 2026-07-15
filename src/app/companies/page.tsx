@@ -8,20 +8,27 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as zod from 'zod';
 import Link from 'next/link';
+import { useAuth } from '@/components/providers';
 
 const companySchema = zod.object({
   name: zod.string().min(2, { message: 'Company name must be at least 2 characters' }),
   trade_license_number: zod.string().min(2, { message: 'Trade license is required' }),
+  trade_license_issue: zod.string().refine((val) => !val || !isNaN(Date.parse(val)), {
+    message: 'Valid issue date is required',
+  }).optional(),
   trade_license_expiry: zod.string().refine((val) => !isNaN(Date.parse(val)), {
     message: 'Valid expiry date is required',
   }),
   logo_url: zod.string().url().or(zod.string().length(0)).optional(),
+  email: zod.string().email({ message: 'Invalid email address' }).or(zod.string().length(0)).optional(),
+  phone: zod.string().or(zod.string().length(0)).optional(),
 });
 
 type CompanyFormFields = zod.infer<typeof companySchema>;
 
 export default function CompaniesPage() {
   const queryClient = useQueryClient();
+  const { profile } = useAuth();
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -62,14 +69,27 @@ export default function CompaniesPage() {
           {
             name: newData.name,
             trade_license_number: newData.trade_license_number,
+            trade_license_issue: newData.trade_license_issue || null,
             trade_license_expiry: newData.trade_license_expiry,
             logo_url: newData.logo_url || null,
             status: 'active',
+            email: newData.email || null,
+            phone: newData.phone || null,
           },
         ])
         .select();
 
       if (error) throw error;
+
+      // Log activity
+      await supabase.from('activity_logs').insert([
+        {
+          user_id: profile?.id || null,
+          action: 'REGISTERED_NEW_COMPANY',
+          details: `Registered a new company: ${newData.name}`,
+        },
+      ]);
+
       return data;
     },
     onSuccess: () => {
@@ -318,18 +338,34 @@ export default function CompaniesPage() {
                   )}
                 </div>
 
-                <div>
-                  <label className="block text-label-md text-on-surface-variant mb-2">Trade License Expiry Date</label>
-                  <input
-                    type="date"
-                    className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-primary ${
-                      errors.trade_license_expiry ? 'border-danger focus:ring-danger' : 'border-border-subtle'
-                    }`}
-                    {...register('trade_license_expiry')}
-                  />
-                  {errors.trade_license_expiry && (
-                    <p className="mt-1 text-danger text-[11px] font-semibold">{errors.trade_license_expiry.message}</p>
-                  )}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-sm">
+                  <div>
+                    <label className="block text-label-md text-on-surface-variant mb-2">Trade License Issue Date</label>
+                    <input
+                      type="date"
+                      className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-primary ${
+                        errors.trade_license_issue ? 'border-danger focus:ring-danger' : 'border-border-subtle'
+                      }`}
+                      {...register('trade_license_issue')}
+                    />
+                    {errors.trade_license_issue && (
+                      <p className="mt-1 text-danger text-[11px] font-semibold">{errors.trade_license_issue.message}</p>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="block text-label-md text-on-surface-variant mb-2">Trade License Expiry Date</label>
+                    <input
+                      type="date"
+                      className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-primary ${
+                        errors.trade_license_expiry ? 'border-danger focus:ring-danger' : 'border-border-subtle'
+                      }`}
+                      {...register('trade_license_expiry')}
+                    />
+                    {errors.trade_license_expiry && (
+                      <p className="mt-1 text-danger text-[11px] font-semibold">{errors.trade_license_expiry.message}</p>
+                    )}
+                  </div>
                 </div>
 
                 <div>
@@ -340,6 +376,30 @@ export default function CompaniesPage() {
                     placeholder="https://example.com/logo.png"
                     {...register('logo_url')}
                   />
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-sm">
+                  <div>
+                    <label className="block text-label-md text-on-surface-variant mb-2">Contact Email (Optional)</label>
+                    <input
+                      type="text"
+                      className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-primary ${
+                        errors.email ? 'border-danger focus:ring-danger' : 'border-border-subtle'
+                      }`}
+                      placeholder="client@example.com"
+                      {...register('email')}
+                    />
+                    {errors.email && <p className="mt-1 text-danger text-[11px] font-semibold">{errors.email.message}</p>}
+                  </div>
+                  <div>
+                    <label className="block text-label-md text-on-surface-variant mb-2">Contact Phone (Optional)</label>
+                    <input
+                      type="text"
+                      className={`w-full px-4 py-2 border border-border-subtle rounded-lg focus:ring-2 focus:ring-primary`}
+                      placeholder="+971 50 123 4567"
+                      {...register('phone')}
+                    />
+                  </div>
                 </div>
 
                 <div className="flex gap-sm justify-end pt-4 border-t border-border-subtle">
