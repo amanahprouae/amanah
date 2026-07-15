@@ -1,12 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 
+// Prevent Next.js from trying to statically pre-render this server-only route at build time
+export const dynamic = 'force-dynamic';
+
 export async function POST(request: NextRequest) {
   try {
     const { p_email, p_password, p_name, p_role, p_company_id } = await request.json();
 
     if (!p_email || !p_password || !p_name) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+    }
+
+    if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+      return NextResponse.json({ error: 'Server misconfiguration: service role key missing' }, { status: 500 });
     }
 
     // Step 1: Create the user in GoTrue via Admin API (proper way)
