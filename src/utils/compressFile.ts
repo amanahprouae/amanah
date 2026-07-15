@@ -9,11 +9,6 @@ import { PDFDocument } from 'pdf-lib';
 export async function compressFile(file: File): Promise<File> {
   const fileType = file.type;
 
-  // Skip compression if the file is already small (less than 1 MB / "KB size")
-  if (file.size < 1024 * 1024) {
-    return file;
-  }
-
   try {
     // 1. Handle Image Compression
     if (fileType.startsWith('image/')) {
@@ -25,7 +20,7 @@ export async function compressFile(file: File): Promise<File> {
       };
 
       const compressedBlob = await imageCompression(file, options);
-      
+
       // If the original file is actually smaller (e.g. already tiny icon), use original
       if (compressedBlob.size >= file.size) {
         return file;
@@ -40,15 +35,15 @@ export async function compressFile(file: File): Promise<File> {
     // 2. Handle PDF Compression (Basic Re-save)
     if (fileType === 'application/pdf') {
       const arrayBuffer = await file.arrayBuffer();
-      
+
       // Load the PDF document
       const pdfDoc = await PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
-      
+
       // Save it back. This often strips out unreferenced objects and some bloated metadata
       const pdfBytes = await pdfDoc.save({ useObjectStreams: false });
-      
+
       const compressedBlob = new Blob([pdfBytes as unknown as BlobPart], { type: 'application/pdf' });
-      
+
       // If the re-saved file is somehow larger or the same, return original
       if (compressedBlob.size >= file.size) {
         return file;
