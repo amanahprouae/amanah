@@ -434,10 +434,14 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
   const { data: employeeCompanyDocs } = useQuery({
     queryKey: ['company-employee-documents', companyId],
     queryFn: async () => {
+      const { data: emps, error: empErr } = await supabase.from('employees').select('id').eq('company_id', companyId);
+      if (empErr) throw empErr;
+      const employeeIds = (emps || []).map((e: any) => e.id).filter(Boolean);
+      if (employeeIds.length === 0) return [];
       const { data, error } = await supabase
         .from('employee_documents')
         .select('*, employees(first_name, last_name, company_id), document_categories(name, code, category_group)')
-        .eq('employees.company_id', companyId)
+        .in('employee_id', employeeIds)
         .order('uploaded_at', { ascending: false });
       if (error) throw error;
       return data || [];
@@ -536,7 +540,9 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
   let partnerDocumentSummary: any[] = [];
 
   if (company?.entity_type === 'individual') {
-    const familyDocs = (employeeCompanyDocs || []).filter((d: any) => d.document_categories?.category_group === 'relative');
+    const familyCompanyDocs = (documents || []).filter((d: any) => d.document_categories?.category_group === 'family');
+    const familyRelativeDocs = (employeeCompanyDocs || []).filter((d: any) => d.document_categories?.category_group === 'relative');
+    const familyDocs = [...familyCompanyDocs, ...familyRelativeDocs];
     const sponsorDocs = (documents || []).filter((d: any) => d.document_categories?.category_group === 'partner');
     companyDocumentSummary = familyDocs;
     partnerDocumentSummary = sponsorDocs;
@@ -618,6 +624,7 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
   const [uploadMainCategory, setUploadMainCategory] = useState<CategoryGroup>('company');
   const [uploadSubCategory, setUploadSubCategory] = useState('');
   const [uploadCustomCategoryName, setUploadCustomCategoryName] = useState('');
+  const [uploadRelativeEmployeeId, setUploadRelativeEmployeeId] = useState('');
   const [editMainCategory, setEditMainCategory] = useState<CategoryGroup>('company');
   const [editSubCategory, setEditSubCategory] = useState('');
   const [editCustomCategoryName, setEditCustomCategoryName] = useState('');
@@ -677,35 +684,74 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
 
       const fileName = uploadFileName || selectedFile.name;
       const cleanFileName = fileName.replace(/[^a-zA-Z0-9_.-]/g, '_');
-      const filePath = `${companyId}/${Date.now()}_${cleanFileName}`;
+      // If uploading a relative document for an individual entity, store under employee_documents and the 'employee-docs' bucket
+      if (company?.entity_type === 'individual' && uploadMainCategory === 'relative') {
+        if (!uploadRelativeEmployeeId) {
+          alert('Please select the relative to attach this document to.');
+          setIsUploading(false);
+          return;
+        }
 
-      // 1. Upload to Supabase Storage Bucket 'company-docs'
-      const { error: storageError } = await supabase.storage
-        .from('company-docs')
-        .upload(filePath, selectedFile, {
-          cacheControl: '3600',
-          upsert: false,
-        });
+        const filePathEmp = `${uploadRelativeEmployeeId}/${Date.now()}_${cleanFileName}`;
 
-      if (storageError) throw storageError;
+        const { error: storageError } = await supabase.storage
+          .from('employee-docs')
+          .upload(filePathEmp, selectedFile, {
+            cacheControl: '3600',
+            upsert: false,
+          });
 
-      // 2. Insert record metadata to Database
-      const { error: dbError } = await supabase.from('company_documents').insert([
-        {
-          company_id: companyId,
-          category_id: finalCategoryId,
-          file_name: fileName,
-          file_path: filePath,
-          size_bytes: selectedFile.size,
-          issue_date: uploadIssue || null,
-          expiry_date: uploadExpiry || null,
-          status: 'active',
-        },
-      ]);
-      if (dbError) {
-        // Rollback storage upload if DB insert fails
-        await supabase.storage.from('company-docs').remove([filePath]);
-        throw dbError;
+        if (storageError) throw storageError;
+
+        const { error: dbError } = await supabase.from('employee_documents').insert([
+          {
+            employee_id: uploadRelativeEmployeeId,
+            category_id: finalCategoryId,
+            file_name: fileName,
+            file_path: filePathEmp,
+            size_bytes: selectedFile.size,
+            issue_date: uploadIssue || null,
+            expiry_date: uploadExpiry || null,
+            status: 'active',
+          },
+        ]);
+
+        if (dbError) {
+          await supabase.storage.from('employee-docs').remove([filePathEmp]);
+          throw dbError;
+        }
+
+      } else {
+        const filePath = `${companyId}/${Date.now()}_${cleanFileName}`;
+
+        // 1. Upload to Supabase Storage Bucket 'company-docs'
+        const { error: storageError } = await supabase.storage
+          .from('company-docs')
+          .upload(filePath, selectedFile, {
+            cacheControl: '3600',
+            upsert: false,
+          });
+
+        if (storageError) throw storageError;
+
+        // 2. Insert record metadata to Database
+        const { error: dbError } = await supabase.from('company_documents').insert([
+          {
+            company_id: companyId,
+            category_id: finalCategoryId,
+            file_name: fileName,
+            file_path: filePath,
+            size_bytes: selectedFile.size,
+            issue_date: uploadIssue || null,
+            expiry_date: uploadExpiry || null,
+            status: 'active',
+          },
+        ]);
+        if (dbError) {
+          // Rollback storage upload if DB insert fails
+          await supabase.storage.from('company-docs').remove([filePath]);
+          throw dbError;
+        }
       }
 
       // Log activity
@@ -717,7 +763,13 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
         },
       ]);
 
-      queryClient.invalidateQueries({ queryKey: ['company-documents', companyId] });
+      if (company?.entity_type === 'individual' && uploadMainCategory === 'relative') {
+        queryClient.invalidateQueries({ queryKey: ['employee-documents', uploadRelativeEmployeeId] });
+        queryClient.invalidateQueries({ queryKey: ['company-employee-documents', companyId] });
+        queryClient.invalidateQueries({ queryKey: ['company-employees', companyId] });
+      } else {
+        queryClient.invalidateQueries({ queryKey: ['company-documents', companyId] });
+      }
       queryClient.invalidateQueries({ queryKey: ['document-categories'] });
       setIsDocModalOpen(false);
       setUploadSubCategory('');
@@ -726,6 +778,7 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
       setUploadIssue('');
       setUploadExpiry('');
       setSelectedFile(null);
+      setUploadRelativeEmployeeId('');
     } catch (err: any) {
       console.error('Upload error:', err);
       alert('Upload failed: ' + (err.message || err));
@@ -1936,6 +1989,26 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
                   <option value="other">Others (Create New Category)</option>
                 </select>
               </div>
+
+              {/* For individual companies, if selecting Relative category, allow picking which relative */}
+              {company?.entity_type === 'individual' && uploadMainCategory === 'relative' && (
+                <div>
+                  <label className="block text-label-md text-on-surface-variant mb-2">Attach To Relative</label>
+                  <select
+                    required
+                    value={uploadRelativeEmployeeId}
+                    onChange={(e) => setUploadRelativeEmployeeId(e.target.value)}
+                    className="w-full px-4 py-2 border border-border-subtle rounded-lg text-sm bg-white"
+                  >
+                    <option value="">Select relative...</option>
+                    {employees?.map((emp: any) => (
+                      <option key={emp.id} value={emp.id}>
+                        {emp.first_name} {emp.last_name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
               {uploadSubCategory === 'other' && (
                 <div>
