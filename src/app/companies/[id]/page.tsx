@@ -2056,7 +2056,9 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
               </div>
 
               <div>
-                <label className="block text-label-md text-on-surface-variant mb-1">Company Logo (Optional)</label>
+                <label className="block text-label-md text-on-surface-variant mb-1">
+                  {editEntityType === 'corporate' ? 'Company Logo (Optional)' : 'Profile Picture (Optional)'}
+                </label>
                 <div className="flex items-center gap-4">
                   {(logoFile || company?.logo_url) && (
                     <img
