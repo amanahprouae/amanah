@@ -196,6 +196,7 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
   const [editDocIssue, setEditDocIssue] = useState('');
   const [editDocExpiry, setEditDocExpiry] = useState('');
   const [editDocCategory, setEditDocCategory] = useState('');
+  const [editDocFile, setEditDocFile] = useState<File | null>(null);
 
   // Edit Employee Document state
   const [isEditEmpDocModalOpen, setIsEditEmpDocModalOpen] = useState(false);
@@ -204,10 +205,19 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
   const [editEmpDocIssue, setEditEmpDocIssue] = useState('');
   const [editEmpDocExpiry, setEditEmpDocExpiry] = useState('');
   const [editEmpDocCategory, setEditEmpDocCategory] = useState('');
+  const [editEmpDocFile, setEditEmpDocFile] = useState<File | null>(null);
 
   // Update Company Document Mutation
   const updateDocMutation = useMutation({
-    mutationFn: async (fields: { id: string; file_name: string; issue_date: string | null; expiry_date: string | null; category_id: string }) => {
+    mutationFn: async (fields: { 
+      id: string; 
+      file_name: string; 
+      issue_date: string | null; 
+      expiry_date: string | null; 
+      category_id: string;
+      new_file?: File | null;
+      old_file_path?: string;
+    }) => {
       let status = 'active';
       if (fields.expiry_date) {
         const exp = new Date(fields.expiry_date);
@@ -219,15 +229,63 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
           status = 'expiring_soon';
         }
       }
+
+      let filePath = fields.old_file_path;
+      let fileSize = editingDoc?.size_bytes;
+
+      if (fields.new_file) {
+        let fileToUpload = fields.new_file;
+        try {
+          fileToUpload = await compressFile(fields.new_file);
+        } catch (e) {
+          console.error('File compression failed, using original', e);
+        }
+        fileSize = fileToUpload.size;
+
+        let nameWithExt = fields.file_name;
+        const originalExtension = fields.new_file.name.split('.').pop();
+        if (originalExtension && !nameWithExt.toLowerCase().endsWith(`.${originalExtension.toLowerCase()}`)) {
+          nameWithExt = `${nameWithExt}.${originalExtension}`;
+        }
+        const cleanName = nameWithExt.replace(/[^a-zA-Z0-9_.-]/g, '_');
+        
+        const isRelative = company?.entity_type === 'individual' && editMainCategory === 'relative';
+        const bucket = isRelative ? 'employee-docs' : 'company-docs';
+        const uploadFolder = isRelative ? (editingDoc?.employee_id || companyId) : companyId;
+        const newPath = `${uploadFolder}/${Date.now()}_${cleanName}`;
+
+        const { error: uploadErr } = await supabase.storage
+          .from(bucket)
+          .upload(newPath, fileToUpload, {
+            cacheControl: '3600',
+            upsert: false,
+          });
+        if (uploadErr) throw uploadErr;
+
+        filePath = newPath;
+
+        if (fields.old_file_path) {
+          const actualOldBucket = editingDoc?.employee_id ? 'employee-docs' : 'company-docs';
+          await supabase.storage.from(actualOldBucket).remove([fields.old_file_path]);
+        }
+      }
+
+      const updatePayload: any = {
+        file_name: fields.file_name,
+        issue_date: fields.issue_date || null,
+        expiry_date: fields.expiry_date || null,
+        category_id: fields.category_id,
+        status,
+      };
+
+      if (fields.new_file && filePath) {
+        updatePayload.file_path = filePath;
+        updatePayload.size_bytes = fileSize;
+      }
+
       const { data, error } = await supabase
         .from('company_documents')
-        .update({
-          file_name: fields.file_name,
-          issue_date: fields.issue_date || null,
-          expiry_date: fields.expiry_date || null,
-          category_id: fields.category_id,
-          status,
-        })
+        .update(updatePayload)
         .eq('id', fields.id)
         .select();
       if (error) throw error;
@@ -247,12 +305,21 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
       queryClient.invalidateQueries({ queryKey: ['company-documents', companyId] });
       setIsEditDocModalOpen(false);
       setEditingDoc(null);
+      setEditDocFile(null);
     },
   });
 
   // Update Employee Document Mutation
   const updateEmpDocMutation = useMutation({
-    mutationFn: async (fields: { id: string; file_name: string; issue_date: string | null; expiry_date: string | null; category_id: string }) => {
+    mutationFn: async (fields: { 
+      id: string; 
+      file_name: string; 
+      issue_date: string | null; 
+      expiry_date: string | null; 
+      category_id: string;
+      new_file?: File | null;
+      old_file_path?: string;
+    }) => {
       let status = 'active';
       if (fields.expiry_date) {
         const exp = new Date(fields.expiry_date);
@@ -264,15 +331,60 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
           status = 'expiring_soon';
         }
       }
+
+      let filePath = fields.old_file_path;
+      let fileSize = editingEmpDoc?.size_bytes;
+
+      if (fields.new_file) {
+        let fileToUpload = fields.new_file;
+        try {
+          fileToUpload = await compressFile(fields.new_file);
+        } catch (e) {
+          console.error('File compression failed, using original', e);
+        }
+        fileSize = fileToUpload.size;
+
+        let nameWithExt = fields.file_name;
+        const originalExtension = fields.new_file.name.split('.').pop();
+        if (originalExtension && !nameWithExt.toLowerCase().endsWith(`.${originalExtension.toLowerCase()}`)) {
+          nameWithExt = `${nameWithExt}.${originalExtension}`;
+        }
+        const cleanName = nameWithExt.replace(/[^a-zA-Z0-9_.-]/g, '_');
+        
+        const uploadFolder = editingEmpDoc?.employee_id || managedEmployee?.id;
+        const newPath = `${uploadFolder}/${Date.now()}_${cleanName}`;
+
+        const { error: uploadErr } = await supabase.storage
+          .from('employee-docs')
+          .upload(newPath, fileToUpload, {
+            cacheControl: '3600',
+            upsert: false,
+          });
+        if (uploadErr) throw uploadErr;
+
+        filePath = newPath;
+
+        if (fields.old_file_path) {
+          await supabase.storage.from('employee-docs').remove([fields.old_file_path]);
+        }
+      }
+
+      const updatePayload: any = {
+        file_name: fields.file_name,
+        issue_date: fields.issue_date || null,
+        expiry_date: fields.expiry_date || null,
+        category_id: fields.category_id,
+        status,
+      };
+
+      if (fields.new_file && filePath) {
+        updatePayload.file_path = filePath;
+        updatePayload.size_bytes = fileSize;
+      }
+
       const { data, error } = await supabase
         .from('employee_documents')
-        .update({
-          file_name: fields.file_name,
-          issue_date: fields.issue_date || null,
-          expiry_date: fields.expiry_date || null,
-          category_id: fields.category_id,
-          status,
-        })
+        .update(updatePayload)
         .eq('id', fields.id)
         .select();
       if (error) throw error;
@@ -294,6 +406,7 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
       }
       setIsEditEmpDocModalOpen(false);
       setEditingEmpDoc(null);
+      setEditEmpDocFile(null);
     },
   });
 
@@ -2414,6 +2527,8 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
                     issue_date: editDocIssue || null,
                     expiry_date: editDocExpiry || null,
                     category_id: finalCategoryId,
+                    new_file: editDocFile,
+                    old_file_path: editingDoc.file_path,
                   });
                 } catch (err: any) {
                   alert('Failed to save category: ' + err.message);
@@ -2505,6 +2620,25 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
                 </div>
               </div>
 
+              <div>
+                <label className="block text-label-md text-on-surface-variant mb-1">Replace Document File (Optional)</label>
+                <input
+                  type="file"
+                  onChange={(e) => {
+                    if (e.target.files && e.target.files.length > 0) {
+                      setEditDocFile(e.target.files[0]);
+                    }
+                  }}
+                  className="w-full px-4 py-2 border border-border-subtle rounded-lg text-sm focus:outline-primary bg-white file:mr-4 file:py-1 file:px-4 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-surface-container file:text-on-surface hover:file:bg-surface-container-high"
+                />
+                {editingDoc && !editDocFile && (
+                  <p className="text-xs text-on-surface-variant mt-1">Current file: <span className="font-semibold">{editingDoc.file_name}</span></p>
+                )}
+                {editDocFile && (
+                  <p className="text-xs text-success mt-1 font-semibold">New file selected: {editDocFile.name}</p>
+                )}
+              </div>
+
               <div className="flex gap-sm justify-end pt-4 border-t border-border-subtle">
                 <button
                   type="button"
@@ -2554,7 +2688,9 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
                   file_name: editEmpDocName,
                   issue_date: editEmpDocIssue || null,
                   expiry_date: editEmpDocExpiry || null,
-                  category_id: editEmpDocCategory, // always a valid category_id from DB selector
+                  category_id: editEmpDocCategory,
+                  new_file: editEmpDocFile,
+                  old_file_path: editingEmpDoc.file_path,
                 });
               }}
               className="space-y-4"
@@ -2610,6 +2746,25 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
                     className="w-full px-4 py-2 border border-border-subtle rounded-lg text-sm focus:outline-primary bg-white"
                   />
                 </div>
+              </div>
+
+              <div>
+                <label className="block text-label-md text-on-surface-variant mb-1">Replace Document File (Optional)</label>
+                <input
+                  type="file"
+                  onChange={(e) => {
+                    if (e.target.files && e.target.files.length > 0) {
+                      setEditEmpDocFile(e.target.files[0]);
+                    }
+                  }}
+                  className="w-full px-4 py-2 border border-border-subtle rounded-lg text-sm focus:outline-primary bg-white file:mr-4 file:py-1 file:px-4 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-surface-container file:text-on-surface hover:file:bg-surface-container-high"
+                />
+                {editingEmpDoc && !editEmpDocFile && (
+                  <p className="text-xs text-on-surface-variant mt-1">Current file: <span className="font-semibold">{editingEmpDoc.file_name}</span></p>
+                )}
+                {editEmpDocFile && (
+                  <p className="text-xs text-success mt-1 font-semibold">New file selected: {editEmpDocFile.name}</p>
+                )}
               </div>
 
               <div className="flex gap-sm justify-end pt-4 border-t border-border-subtle">
