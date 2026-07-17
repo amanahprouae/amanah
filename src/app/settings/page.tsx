@@ -16,6 +16,7 @@ export default function SettingsPage() {
   const [phoneNum, setPhoneNum] = useState('+971 4 000 0000');
   const [adminCompanyName, setAdminCompanyName] = useState('PRO Services');
   const [adminCompanyLogoUrl, setAdminCompanyLogoUrl] = useState('');
+  const [adminCompanyLogoFile, setAdminCompanyLogoFile] = useState<File | null>(null);
 
   // Fetch PROs
   const { data: pros, isLoading: isProsLoading } = useQuery({
@@ -57,6 +58,23 @@ export default function SettingsPage() {
 
   const saveSettingsMutation = useMutation({
     mutationFn: async () => {
+      let finalLogoUrl = adminCompanyLogoUrl;
+      if (adminCompanyLogoFile) {
+        const fileExt = adminCompanyLogoFile.name.split('.').pop();
+        const fileName = `admin_logos/${Date.now()}_${Math.random().toString(36).substring(2)}.${fileExt}`;
+        const { error: uploadError } = await supabase.storage
+          .from('public-assets')
+          .upload(fileName, adminCompanyLogoFile, {
+            cacheControl: '3600',
+            upsert: true,
+          });
+        if (uploadError) throw uploadError;
+        
+        finalLogoUrl = supabase.storage
+          .from('public-assets')
+          .getPublicUrl(fileName).data.publicUrl;
+      }
+
       const settings = [
         { key: 'support_whatsapp', value: whatsappNum },
         { key: 'support_phone', value: phoneNum },
@@ -64,7 +82,7 @@ export default function SettingsPage() {
         { key: 'alert_email', value: alertEmail },
         { key: 'grace_period', value: gracePeriod.toString() },
         { key: 'admin_company_name', value: adminCompanyName },
-        { key: 'admin_company_logo_url', value: adminCompanyLogoUrl }
+        { key: 'admin_company_logo_url', value: finalLogoUrl }
       ];
       const { error } = await supabase.from('app_settings').upsert(settings);
       if (error) throw error;
@@ -189,13 +207,28 @@ export default function SettingsPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-label-md text-on-surface-variant mb-1.5">Admin PRO Company Logo URL</label>
-                  <input
-                    type="text"
-                    value={adminCompanyLogoUrl}
-                    onChange={(e) => setAdminCompanyLogoUrl(e.target.value)}
-                    className="w-full px-4 py-2 border border-border-subtle rounded-lg text-sm bg-bg-subtle focus:ring-2 focus:ring-primary"
-                  />
+                  <label className="block text-label-md text-on-surface-variant mb-1.5">Admin PRO Company Logo</label>
+                  <div className="flex items-center gap-4">
+                    {adminCompanyLogoUrl && !adminCompanyLogoFile && (
+                      <img src={adminCompanyLogoUrl} alt="Current Logo" className="h-10 w-10 object-contain rounded border border-border-subtle bg-white" />
+                    )}
+                    {adminCompanyLogoFile && (
+                      <div className="h-10 w-10 rounded border border-border-subtle bg-bg-subtle flex items-center justify-center text-xs text-on-surface-variant overflow-hidden">
+                        New
+                      </div>
+                    )}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => {
+                        if (e.target.files && e.target.files[0]) {
+                          setAdminCompanyLogoFile(e.target.files[0]);
+                        }
+                      }}
+                      className="flex-1 px-4 py-2 border border-border-subtle rounded-lg text-sm bg-bg-subtle focus:ring-2 focus:ring-primary file:mr-4 file:py-1 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary/10 file:text-primary hover:file:bg-primary/20"
+                    />
+                  </div>
+                  <p className="text-xs text-on-surface-variant mt-1">Upload a new logo to replace the current one.</p>
                 </div>
               </div>
 
