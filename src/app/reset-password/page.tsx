@@ -137,9 +137,13 @@ export default function ResetPasswordPage() {
           throw new Error('Invalid reset link: missing code verifier. Please request a new password reset link from the app.');
         }
         
-        const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code, {
-          code_verifier: codeVerifier,
-        });
+        // In Supabase JS v2, exchangeCodeForSession looks for code_verifier in sessionStorage
+        // Set it with the expected key before calling the method
+        if (typeof window !== 'undefined') {
+          sessionStorage.setItem('supabase-code-verifier', codeVerifier);
+        }
+        
+        const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
         if (exchangeError) {
           throw new Error(exchangeError.message || 'Invalid or expired reset link. Try requesting a new link from the app.');
         }
