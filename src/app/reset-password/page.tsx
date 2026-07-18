@@ -97,16 +97,14 @@ export default function ResetPasswordPage() {
       await supabase.auth.signOut();
 
 setSuccess(
-  "Password updated successfully! You can now close this page and sign in from the PRO mobile app."
+  'Password updated successfully! You can now close this page and sign in from the PRO mobile app with your new password.'
 );
-    } catch (err: any) {
-      console.error('Password update error:', err);
-      setError(err?.message || 'Failed to update password');
-    } finally {
-      setSubmitting(false);
-    }
-  };
 
+// Sign out the temporary recovery session
+await supabase.auth.signOut();
+
+// Keep the success message visible
+setSessionReady(false);
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-[#f5f5f0] to-[#e8ecde] p-4">
       <div className="w-full max-w-md">
