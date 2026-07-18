@@ -17,40 +17,72 @@ export default function ResetPasswordPage() {
   useEffect(() => {
     let mounted = true;
 
-    async function checkSession() { 
-      
-      
+    // Step 1: subscribe to auth state changes BEFORE doing anything else.
+    // When the server-set recovery session cookie is detected by the
+    // browser client it fires either PASSWORD_RECOVERY or SIGNED_IN.
+    // We must subscribe first to avoid a race where the event fires
+    // before we start listening.
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (event, session) => {
+        console.log('onAuthStateChange:', event, session?.user?.email);
+
+        if (!mounted) return;
+
+        if (
+          (event === 'PASSWORD_RECOVERY' || event === 'SIGNED_IN') &&
+          session
+        ) {
+          console.log('Recovery session detected via auth event');
+          setSessionReady(true);
+          setLoading(false);
+        }
+      }
+    );
+
+    // Step 2: also check immediately in case the event already fired
+    // (e.g. fast page load where the cookie was already present).
+    async function checkSession() {
       console.log('=== RESET PAGE ===');
 
       const sessionResult = await supabase.auth.getSession();
       console.log('getSession:', sessionResult);
-
-      const userResult = await supabase.auth.getUser();
-      console.log('getUser:', userResult);
 
       if (!mounted) return;
 
       const session = sessionResult.data.session;
 
       if (session) {
-        console.log('Session found!');
+        console.log('Session found via getSession');
         setSessionReady(true);
         setLoading(false);
         return;
       }
 
-      console.log('No session found');
+      // No session yet — wait up to 5 s for the auth event before giving up.
+      console.log('No session yet, waiting for auth event...');
+      const timeout = setTimeout(() => {
+        if (!mounted) return;
+        // Still no session after 5 s — the link is genuinely expired/used.
+        setLoading((prev) => {
+          if (prev) {
+            console.log('Timed out waiting for session');
+            setError(
+              'Invalid or expired password reset link. Please request a new one.'
+            );
+          }
+          return false;
+        });
+      }, 5000);
 
-      setError(
-        'Invalid or expired password reset link. Please request a new one.'
-      );
-      setLoading(false);
+      return () => clearTimeout(timeout);
     }
 
-    checkSession();
+    const cleanup = checkSession();
 
     return () => {
       mounted = false;
+      subscription.unsubscribe();
+      cleanup?.then?.((fn) => fn?.());
     };
   }, []);
 
