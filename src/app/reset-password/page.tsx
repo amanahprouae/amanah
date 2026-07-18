@@ -12,13 +12,12 @@ export default function ResetPasswordPage() {
   const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
   const [code, setCode] = useState<string | null>(null);
-  const [codeVerifier, setCodeVerifier] = useState<string | null>(null);
+  const [tokenHash, setTokenHash] = useState<string | null>(null);
 
   useEffect(() => {
-    // Extract code and code_verifier from URL
-    // Supabase PKCE flow includes both in the reset URL
+    // Extract code and token_hash from URL (supports both query params and hash fragment)
     let extractedCode: string | null = null;
-    let extractedCodeVerifier: string | null = null;
+    let extractedTokenHash: string | null = null;
     
     console.log('Full URL:', window.location.href);
     console.log('Search params:', window.location.search);
@@ -27,21 +26,22 @@ export default function ResetPasswordPage() {
     // Check query parameters first
     const urlParams = new URLSearchParams(window.location.search);
     extractedCode = urlParams.get('code');
-    extractedCodeVerifier = urlParams.get('code_verifier');
+    extractedTokenHash = urlParams.get('token_hash');
     
     // If not in query params, check hash fragment
-    if (!extractedCode && window.location.hash) {
+    if (!extractedCode && !extractedTokenHash && window.location.hash) {
       const hashParams = new URLSearchParams(window.location.hash.substring(1));
       extractedCode = hashParams.get('code');
-      extractedCodeVerifier = hashParams.get('code_verifier');
+      extractedTokenHash = hashParams.get('token_hash');
     }
     
     console.log('Parsed code:', extractedCode);
-    console.log('Parsed code_verifier:', extractedCodeVerifier);
+    console.log('Parsed token_hash:', extractedTokenHash);
     
     if (extractedCode) {
       setCode(extractedCode);
-      setCodeVerifier(extractedCodeVerifier);
+    } else if (extractedTokenHash) {
+      setTokenHash(extractedTokenHash);
     } else {
       setError('Invalid or expired reset link. Please request a new password reset link from the app.');
     }
@@ -75,25 +75,32 @@ export default function ResetPasswordPage() {
     setLoading(true);
 
     try {
-      // Use official Supabase PKCE flow
-      // The code_verifier is required for PKCE authentication
-      console.log('Exchanging code for session with PKCE...');
-      
-      if (!code) {
-        throw new Error('Missing reset code');
+      if (tokenHash) {
+        // Option 1: Cross-Client Recovery Flow (Initiated in Flutter, verified on Next.js browser via direct token_hash link)
+        console.log('Verifying token hash...');
+        const { error: verifyError } = await supabase.auth.verifyOtp({
+          token_hash: tokenHash,
+          type: 'recovery',
+        });
+        
+        if (verifyError) {
+          console.error('OTP Verification error:', verifyError);
+          throw new Error(verifyError.message || 'Invalid or expired recovery token');
+        }
+      } else if (code) {
+        // Option 2: Standard PKCE Authorization Code Flow (Initiated and completed in the same browser)
+        console.log('Exchanging code for session...');
+        const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
+        
+        if (exchangeError) {
+          console.error('Session exchange error:', exchangeError);
+          throw new Error(exchangeError.message || 'Invalid or expired reset link');
+        }
+      } else {
+        throw new Error('No valid code or token hash found in the link. Please request a new link.');
       }
 
-      // Exchange the authorization code for a session
-      // This requires the code_verifier from the URL
-      const { data: exchangeData, error: exchangeError } = 
-        await supabase.auth.exchangeCodeForSession(code, codeVerifier || undefined);
-      
-      if (exchangeError) {
-        console.error('Session error:', exchangeError);
-        throw new Error(exchangeError.message || 'Invalid or expired reset link');
-      }
-
-      console.log('Session created successfully');
+      console.log('Session established successfully');
 
       // Update the password using the established session
       const { error: updateError } = await supabase.auth.updateUser({
@@ -101,14 +108,14 @@ export default function ResetPasswordPage() {
       });
 
       if (updateError) {
-        console.error('Update error:', updateError);
+        console.error('Password update error:', updateError);
         throw updateError;
       }
 
       console.log('Password updated successfully');
       setSuccess('Password updated successfully! Redirecting to login...');
       
-      // Sign out and redirect to login
+      // Sign out the user from the current recovery session and redirect to login page
       setTimeout(async () => {
         await supabase.auth.signOut();
         router.push('/login');
@@ -151,7 +158,7 @@ export default function ResetPasswordPage() {
             </div>
           )}
 
-          {!code ? (
+          {!code && !tokenHash ? (
             <div className="text-center">
               <p className="text-red-600 mb-4">Invalid or expired reset link</p>
               <p className="text-sm text-[#8a8a80] mb-4">
