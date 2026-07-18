@@ -18,18 +18,7 @@ export default function ResetPasswordPage() {
     let mounted = true;
 
     async function checkSession() { 
-      const params = new URLSearchParams(window.location.search);
-
-if (params.get('expired') === 'true') {
-  setLoading(false);
-  setSessionReady(false);
-  setError(
-    'This password reset link has expired or has already been used. Please request a new password reset email from the PRO mobile app.'
-  );
-  return;
-}
-
-
+      
       
       console.log('=== RESET PAGE ===');
 
