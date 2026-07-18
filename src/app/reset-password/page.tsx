@@ -41,6 +41,15 @@ export default function ResetPasswordPage() {
     }
   }, []);
 
+  const validatePassword = (pwd: string): string | null => {
+    if (pwd.length < 8) return 'Password must be at least 8 characters';
+    if (!/[A-Z]/.test(pwd)) return 'Password must contain at least one uppercase letter';
+    if (!/[a-z]/.test(pwd)) return 'Password must contain at least one lowercase letter';
+    if (!/[0-9]/.test(pwd)) return 'Password must contain at least one number';
+    if (!/[^A-Za-z0-9]/.test(pwd)) return 'Password must contain at least one special character';
+    return null;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -51,8 +60,9 @@ export default function ResetPasswordPage() {
       return;
     }
 
-    if (password.length < 8) {
-      setError('Password must be at least 8 characters');
+    const passwordError = validatePassword(password);
+    if (passwordError) {
+      setError(passwordError);
       return;
     }
 
@@ -65,6 +75,10 @@ export default function ResetPasswordPage() {
       
       if (sessionError) {
         console.error('Session error:', sessionError);
+        // Handle PKCE error specifically
+        if (sessionError.message?.includes('code verifier')) {
+          throw new Error('Invalid or expired reset link. Please request a new password reset link from the app.');
+        }
         throw sessionError;
       }
 
