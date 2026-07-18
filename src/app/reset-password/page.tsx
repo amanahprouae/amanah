@@ -83,11 +83,11 @@ export default function ResetPasswordPage() {
         setCode(extractedCode);
         setAuthMethod('code');
         setReady(true);
+        return;
       } else {
         console.error('PKCE code found but no code_verifier - invalid auth flow');
-        // Don't set as ready, will fall through to error below
+        // Fall through to error handling below
       }
-      return;
     }
     
     // Special case: If there's a code parameter with type=recovery, this is an invalid
@@ -97,6 +97,13 @@ export default function ResetPasswordPage() {
       console.error('Invalid password reset link: received code parameter instead of access_token');
       console.error('URL should have #access_token=...&refresh_token=...&type=recovery');
       setError('Invalid password reset link. Please request a new link from the app. The link should open directly to the reset form without requiring additional verification.');
+      return;
+    }
+    
+    // If we have a code but no verifier and type is not recovery, also show error
+    if (extractedCode) {
+      console.error('Invalid auth link: code parameter without code_verifier');
+      setError('Invalid authentication link. Please ensure you are using the correct password reset link from the app.');
       return;
     }
 
