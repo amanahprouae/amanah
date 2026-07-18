@@ -15,6 +15,7 @@ export default function ResetPasswordPage() {
   const [authMethod, setAuthMethod] = useState<'session' | 'token_hash' | 'code' | null>(null);
   const [tokenHash, setTokenHash] = useState<string | null>(null);
   const [code, setCode] = useState<string | null>(null);
+  const [codeVerifier, setCodeVerifier] = useState<string | null>(null);
 
   useEffect(() => {
     const url = window.location.href;
@@ -23,14 +24,15 @@ export default function ResetPasswordPage() {
 
     console.log('Reset password URL:', url);
 
-    // ─── Priority 1: Hash fragment with access_token (Supabase default implicit flow) ───
+    // ─── Priority 1: Hash fragment or query params with access_token (Supabase implicit flow) ───
     // Supabase default email sends: #access_token=xxx&refresh_token=yyy&type=recovery
-    const accessToken = hashParams.get('access_token');
-    const refreshToken = hashParams.get('refresh_token');
+    // But sometimes tokens might be in query params depending on configuration
+    const accessToken = hashParams.get('access_token') || searchParams.get('access_token');
+    const refreshToken = hashParams.get('refresh_token') || searchParams.get('refresh_token');
     const type = hashParams.get('type') || searchParams.get('type');
 
     if (accessToken && refreshToken && type === 'recovery') {
-      console.log('Detected implicit flow with access_token in hash');
+      console.log('Detected implicit flow with access_token');
       // Directly set the session using the tokens from the URL — no code_verifier needed
       supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken })
         .then(({ error: sessionError }) => {
@@ -58,8 +60,22 @@ export default function ResetPasswordPage() {
 
     // ─── Priority 3: PKCE code in query param (same-browser web flow) ───
     const extractedCode = searchParams.get('code');
-    if (extractedCode) {
+    // Only use code if it's a recovery flow (type=recovery) or if there's no type but we have a code
+    if (extractedCode && (type === 'recovery' || !type)) {
       console.log('Detected PKCE code in query params');
+      
+      // Try to get code_verifier from URL params first, then sessionStorage
+      const urlCodeVerifier = searchParams.get('code_verifier');
+      const storedCodeVerifier = typeof window !== 'undefined' ? sessionStorage.getItem('supabase-code-verifier') : null;
+      const verifier = urlCodeVerifier || storedCodeVerifier;
+      
+      if (verifier) {
+        console.log('Found code_verifier');
+        setCodeVerifier(verifier);
+      } else {
+        console.warn('No code_verifier found in URL or sessionStorage');
+      }
+      
       setCode(extractedCode);
       setAuthMethod('code');
       setReady(true);
@@ -116,7 +132,14 @@ export default function ResetPasswordPage() {
       } else if (authMethod === 'code' && code) {
         // PKCE code exchange (only works if initiated in same browser)
         console.log('Exchanging PKCE code for session...');
-        const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
+        
+        if (!codeVerifier) {
+          throw new Error('Invalid reset link: missing code verifier. Please request a new password reset link from the app.');
+        }
+        
+        const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code, {
+          code_verifier: codeVerifier,
+        });
         if (exchangeError) {
           throw new Error(exchangeError.message || 'Invalid or expired reset link. Try requesting a new link from the app.');
         }
