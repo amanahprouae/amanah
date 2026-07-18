@@ -61,13 +61,15 @@ export default function UsersRolesPage() {
     },
   });
 
-  // Toggle user block status mutation
+  // Toggle user block status mutation.
+  // Writes both `status` (admin webapp display) and `is_blocked` (Flutter
+  // mobile app reads) so both sides stay in sync from a single action.
   const toggleUserStatusMutation = useMutation({
     mutationFn: async ({ id, currentStatus }: { id: string; currentStatus: string }) => {
-      const nextStatus = currentStatus === 'active' ? 'blocked' : 'active';
+      const blocking = currentStatus === 'active';
       const { error } = await supabase
         .from('users')
-        .update({ status: nextStatus })
+        .update({ status: blocking ? 'blocked' : 'active', is_blocked: blocking })
         .eq('id', id);
       if (error) throw error;
     },
