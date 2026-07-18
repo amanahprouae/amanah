@@ -192,29 +192,51 @@ export default function ResetPasswordPage() {
           console.log('token_hash:', code, 'type:', otpType, 'redirectUrl:', redirectUrl);
           
           // Try with token_hash first
+          let session = null;
           let verifyError = null;
+          
           try {
             const result = await supabase.auth.verifyOtp({
               token_hash: code,
               type: otpType,
             });
             verifyError = result.error;
+            session = result.data?.session;
           } catch (e) {
             verifyError = e;
+            console.error('token_hash attempt failed:', e);
           }
           
-          // If that fails, try with just 'token' parameter name (for older Supabase versions)
-          if (verifyError) {
-            console.log('token_hash failed, trying token...');
-            const result = await supabase.auth.verifyOtp({
-              token: code,
-              type: otpType,
-            } as any);
-            verifyError = result.error;
+          // If that fails, try with 'token' parameter name (for some Supabase versions)
+          if (verifyError && !session) {
+            console.log('Trying with token parameter...');
+            try {
+              const result = await supabase.auth.verifyOtp({
+                token: code,
+                type: otpType,
+              } as any);
+              verifyError = result.error;
+              session = result.data?.session;
+            } catch (e) {
+              verifyError = e;
+              console.error('token attempt failed:', e);
+            }
           }
           
-          if (verifyError) {
-          if (verifyError) {
+          // Also try exchangeCodeForSession as fallback for PKCE flow
+          if (verifyError && !session) {
+            console.log('Trying exchangeCodeForSession...');
+            try {
+              const result = await supabase.auth.exchangeCodeForSession(code);
+              verifyError = result.error;
+              session = result.data?.session;
+            } catch (e) {
+              verifyError = e;
+              console.error('exchangeCodeForSession failed:', e);
+            }
+          }
+          
+          if (verifyError && !session) {
             // Enhanced error message with more details
             console.error('verifyOtp error details:', verifyError);
             console.error('Supabase URL:', window.location.href);
