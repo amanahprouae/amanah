@@ -49,17 +49,10 @@ export async function GET(request: NextRequest) {
     data,
     error,
   });
-
-  if (error) {
+if (error) {
   console.error('verifyOtp failed:', error);
 
   return NextResponse.redirect(
-  `${origin}/login?error=${encodeURIComponent(error.message)}`
-);
-}
-
-
-  console.log('verifyOtp succeeded');
-console.log("Cookies being returned:", response.cookies.getAll());
-  return response;
+    `${origin}/reset-link-expired`
+  );
 }
