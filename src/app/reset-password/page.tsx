@@ -4,6 +4,14 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
 
+// Detect if user is on mobile device
+const isMobileDevice = () => {
+  if (typeof window === 'undefined') return false;
+  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+    navigator.userAgent
+  );
+};
+
 export default function ResetPasswordPage() {
   const router = useRouter();
   const [password, setPassword] = useState('');
@@ -14,15 +22,27 @@ export default function ResetPasswordPage() {
   const [token, setToken] = useState<string | null>(null);
 
   useEffect(() => {
-    // Extract token from URL
+    // Extract token from URL - Supabase sends it as access_token and type=recovery
     const urlParams = new URLSearchParams(window.location.search);
-    const accessToken = urlParams.get('token');
+    const accessToken = urlParams.get('access_token');
     const type = urlParams.get('type');
+    
+    console.log('URL params:', { accessToken, type });
     
     if (accessToken && type === 'recovery') {
       setToken(accessToken);
+      
+      // If on mobile device, automatically try to open the app
+      if (isMobileDevice()) {
+        console.log('Mobile device detected, redirecting to app...');
+        // Give a small delay to show the page briefly, then redirect
+        setTimeout(() => {
+          // Try to open the app with the token
+          window.location.href = `proapp://reset-password?token=${accessToken}&type=recovery`;
+        }, 800);
+      }
     } else {
-      setError('Invalid or expired reset link');
+      setError('Invalid or expired reset link. Please request a new password reset link.');
     }
   }, []);
 
@@ -109,12 +129,36 @@ export default function ResetPasswordPage() {
 
           {!token ? (
             <div className="text-center">
-              <p className="text-red-600">Invalid or expired reset link</p>
+              <p className="text-red-600 mb-4">Invalid or expired reset link</p>
+              <p className="text-sm text-[#8a8a80] mb-4">
+                Please request a new password reset link from the app.
+              </p>
+              {isMobileDevice() && (
+                <button
+                  onClick={() => {
+                    window.location.href = 'proapp://reset-password';
+                  }}
+                  className="px-6 py-2 bg-[#316342] text-white rounded-lg hover:bg-[#3d4a2a] transition-colors"
+                >
+                  Open PRO Services App
+                </button>
+              )}
+            </div>
+          ) : isMobileDevice() ? (
+            // Mobile: Show loading while redirecting to app
+            <div className="text-center">
+              <div className="inline-block animate-spin rounded-full h-12 w-12 border-4 border-[#316342] border-t-transparent mb-4"></div>
+              <p className="text-[#2b2b26] font-semibold mb-2">Opening PRO Services App...</p>
+              <p className="text-sm text-[#8a8a80] mb-4">
+                If the app doesn't open automatically, tap the button below:
+              </p>
               <button
-                onClick={() => router.push('/login')}
-                className="mt-4 px-6 py-2 bg-[#316342] text-white rounded-lg hover:bg-[#3d4a2a] transition-colors"
+                onClick={() => {
+                  window.location.href = `proapp://reset-password?token=${token}&type=recovery`;
+                }}
+                className="px-6 py-2 bg-[#316342] text-white rounded-lg hover:bg-[#3d4a2a] transition-colors"
               >
-                Go to Login
+                Open App
               </button>
             </div>
           ) : (
