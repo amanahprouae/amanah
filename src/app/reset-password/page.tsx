@@ -94,10 +94,11 @@ export default function ResetPasswordPage() {
       console.log('Password updated:', data);
       setSuccess('Password updated successfully. Redirecting to login...');
 
-      setTimeout(async () => {
-        await supabase.auth.signOut();
-        router.push('/login');
-      }, 1500);
+      await supabase.auth.signOut();
+
+setSuccess(
+  "Password updated successfully! You can now close this page and sign in from the PRO mobile app."
+);
     } catch (err: any) {
       console.error('Password update error:', err);
       setError(err?.message || 'Failed to update password');
