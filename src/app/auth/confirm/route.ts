@@ -51,12 +51,13 @@ export async function GET(request: NextRequest) {
   });
 
   if (error) {
-    console.error('verifyOtp failed:', error);
+  console.error('verifyOtp failed:', error);
 
-    return NextResponse.redirect(
-      `${origin}/login?error=${encodeURIComponent(error.message)}`
-    );
-  }
+  return NextResponse.redirect(
+    `${origin}/reset-password?expired=true`
+  );
+}
+
 
   console.log('verifyOtp succeeded');
 console.log("Cookies being returned:", response.cookies.getAll());
