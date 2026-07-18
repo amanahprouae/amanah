@@ -59,16 +59,36 @@ export default function NotificationsConfigPage() {
   // Add Notification
   const addNotifyMutation = useMutation({
     mutationFn: async (fields: NotifyFields) => {
-      const { error } = await supabase.from('notifications').insert([
-        {
-          company_id: fields.company_id || null,
-          title: fields.title,
-          message: fields.message,
-          type: fields.type,
-          is_read: false,
-        },
-      ]);
+      // 1. Insert into Supabase
+      const { data: inserted, error } = await supabase
+        .from('notifications')
+        .insert([
+          {
+            company_id: fields.company_id || null,
+            title: fields.title,
+            message: fields.message,
+            type: fields.type,
+            is_read: false,
+          },
+        ])
+        .select('id');
       if (error) throw error;
+
+      const notificationId = inserted?.[0]?.id;
+
+      // 2. Send FCM push (fire-and-forget — non-blocking)
+      if (notificationId) {
+        fetch('/api/send-push', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            notification_id: notificationId,
+            company_id: fields.company_id || null,
+            title: fields.title,
+            message: fields.message,
+          }),
+        }).catch((e) => console.error('Push send error:', e));
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['all-notifications'] });
@@ -76,6 +96,7 @@ export default function NotificationsConfigPage() {
       reset();
     },
   });
+
 
   // Delete Notification
   const deleteNotifyMutation = useMutation({

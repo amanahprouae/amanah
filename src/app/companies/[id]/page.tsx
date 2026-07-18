@@ -1853,9 +1853,20 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
                         const isVisaExpired = derivedVisaExpiry && new Date(derivedVisaExpiry) < new Date();
                         const isPassportExpired = derivedPassportExpiry && new Date(derivedPassportExpiry) < new Date();
 
+                        const hasExpiredDoc = empDocs.some((d: any) => d.expiry_date && new Date(d.expiry_date) < new Date());
+
                         return (
                           <tr key={emp.id} className="hover:bg-surface-container-lowest transition-colors">
-                            <td className="p-lg font-bold">{emp.first_name} {emp.last_name}</td>
+                            <td className="p-lg font-bold">
+                              <div className="flex items-center">
+                                <span>
+                                  {emp.first_name} {emp.last_name}
+                                </span>
+                                {hasExpiredDoc && (
+                                  <span className="ml-2 w-2.5 h-2.5 bg-danger rounded-full inline-block" title="This employee has one or more expired documents."></span>
+                                )}
+                              </div>
+                            </td>
                             <td className="p-lg text-on-surface-variant font-medium">{emp.designation}</td>
                             <td className="p-lg">
                               <span className={isVisaExpired ? 'text-danger font-bold' : ''}>
