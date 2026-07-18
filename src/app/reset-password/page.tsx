@@ -90,21 +90,37 @@ export default function ResetPasswordPage() {
       }
     }
     
-    // Special case: If there's a code parameter with type=recovery, this is an invalid
-    // password reset link. Supabase should send access_token in hash, not code.
-    // This can happen with misconfigured email templates.
+    // For recovery flow: Supabase sends ?code=XXX&type=recovery
+    // This is VALID - for recovery, we use verifyOtp(), not exchangeCodeForSession
     if (extractedCode && type === 'recovery') {
-      console.error('Invalid password reset link: received code parameter instead of access_token');
-      console.error('URL should have #access_token=...&refresh_token=...&type=recovery');
-      setError('Invalid password reset link. Please request a new link from the app. The link should open directly to the reset form without requiring additional verification.');
+      console.log('Detected recovery flow with code parameter');
+      setCode(extractedCode);
+      setAuthMethod('code');
+      setReady(true);
       return;
     }
     
-    // If we have a code but no verifier and type is not recovery, also show error
-    if (extractedCode) {
-      console.error('Invalid auth link: code parameter without code_verifier');
-      setError('Invalid authentication link. Please ensure you are using the correct password reset link from the app.');
-      return;
+    // For PKCE flow (non-recovery): code without type or type !== recovery
+    if (extractedCode && type !== 'recovery') {
+      console.log('Detected PKCE code in query params (non-recovery flow)');
+      
+      // Try to get code_verifier from URL params first, then sessionStorage
+      const urlCodeVerifier = searchParams.get('code_verifier');
+      const storedCodeVerifier = typeof window !== 'undefined' ? sessionStorage.getItem('supabase-code-verifier') : null;
+      const verifier = urlCodeVerifier || storedCodeVerifier;
+      
+      if (verifier) {
+        console.log('Found code_verifier for PKCE flow');
+        setCodeVerifier(verifier);
+        setCode(extractedCode);
+        setAuthMethod('code');
+        setReady(true);
+        return;
+      } else {
+        console.error('PKCE code found but no code_verifier - invalid auth flow');
+        setError('Invalid authentication link. PKCE code requires a code_verifier.');
+        return;
+      }
     }
 
     // Nothing valid found
@@ -168,22 +184,31 @@ export default function ResetPasswordPage() {
           throw new Error(verifyError.message || 'Invalid or expired recovery token');
         }
       } else if (authMethod === 'code' && code) {
-        // PKCE code exchange (only works if initiated in same browser)
-        console.log('Exchanging PKCE code for session...');
+        // For recovery flow: code parameter with type=recovery uses verifyOtp
+        // For PKCE flow: code parameter with code_verifier uses exchangeCodeForSession
+        console.log('Auth method is code, code:', code, 'codeVerifier:', codeVerifier);
         
-        if (!codeVerifier) {
-          throw new Error('Invalid reset link: missing code verifier. Please request a new password reset link from the app.');
-        }
-        
-        // In Supabase JS v2, exchangeCodeForSession looks for code_verifier in sessionStorage
-        // Set it with the expected key before calling the method
-        if (typeof window !== 'undefined') {
-          sessionStorage.setItem('supabase-code-verifier', codeVerifier);
-        }
-        
-        const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
-        if (exchangeError) {
-          throw new Error(exchangeError.message || 'Invalid or expired reset link. Try requesting a new link from the app.');
+        if (codeVerifier) {
+          // PKCE flow (non-recovery)
+          console.log('Exchanging PKCE code for session...');
+          if (typeof window !== 'undefined') {
+            sessionStorage.setItem('supabase-code-verifier', codeVerifier);
+          }
+          const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
+          if (exchangeError) {
+            throw new Error(exchangeError.message || 'Invalid or expired reset link. Try requesting a new link from the app.');
+          }
+        } else {
+          // Recovery flow: code with type=recovery, no code_verifier needed
+          // For Supabase recovery, code IS the token_hash, use verifyOtp
+          console.log('Verifying recovery code with verifyOtp...');
+          const { error: verifyError } = await supabase.auth.verifyOtp({
+            token_hash: code,
+            type: 'recovery',
+          });
+          if (verifyError) {
+            throw new Error(verifyError.message || 'Invalid or expired recovery link. Please request a new one from the app.');
+          }
         }
       } else {
         throw new Error('No valid reset credentials found. Please request a new link from the app.');
