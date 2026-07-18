@@ -54,8 +54,8 @@ export async function GET(request: NextRequest) {
   console.error('verifyOtp failed:', error);
 
   return NextResponse.redirect(
-    `${origin}/reset-password?expired=true`
-  );
+  `${origin}/login?error=${encodeURIComponent(error.message)}`
+);
 }
 
 
