@@ -65,33 +65,11 @@ export default function ResetPasswordPage() {
       return;
     }
 
-    // ─── Priority 3: PKCE code in query param (ONLY for non-recovery flows) ───
-    // For password reset (recovery), Supabase uses implicit flow with access_token in hash,
-    // NOT PKCE with code. So we only use code path for non-recovery auth flows.
+    // ─── Priority 3: Handle code parameter ───
     const extractedCode = searchParams.get('code');
-    if (extractedCode && type !== 'recovery') {
-      console.log('Detected PKCE code in query params (non-recovery flow)');
-      
-      // Try to get code_verifier from URL params first, then sessionStorage
-      const urlCodeVerifier = searchParams.get('code_verifier');
-      const storedCodeVerifier = typeof window !== 'undefined' ? sessionStorage.getItem('supabase-code-verifier') : null;
-      const verifier = urlCodeVerifier || storedCodeVerifier;
-      
-      if (verifier) {
-        console.log('Found code_verifier');
-        setCodeVerifier(verifier);
-        setCode(extractedCode);
-        setAuthMethod('code');
-        setReady(true);
-        return;
-      } else {
-        console.error('PKCE code found but no code_verifier - invalid auth flow');
-        // Fall through to error handling below
-      }
-    }
     
     // For recovery flow: Supabase sends ?code=XXX&type=recovery
-    // This is VALID - for recovery, we use verifyOtp(), not exchangeCodeForSession
+    // This is VALID - for recovery, the code IS the token_hash, use verifyOtp()
     if (extractedCode && type === 'recovery') {
       console.log('Detected recovery flow with code parameter');
       setCode(extractedCode);
