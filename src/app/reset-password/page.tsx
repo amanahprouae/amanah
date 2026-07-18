@@ -22,38 +22,39 @@ export default function ResetPasswordPage() {
   const [token, setToken] = useState<string | null>(null);
 
   useEffect(() => {
-    // Extract token from URL - Supabase sends it as 'token' (not access_token)
-    let tokenValue: string | null = null;
+    // Extract code from URL - Supabase uses PKCE flow with 'code' parameter
+    let code: string | null = null;
     let type: string | null = null;
     
     console.log('Full URL:', window.location.href);
     console.log('Search params:', window.location.search);
     console.log('Hash:', window.location.hash);
     
-    // Check query parameters - Supabase uses 'token' not 'access_token'
+    // Check query parameters - Supabase uses 'code' for PKCE flow
     const urlParams = new URLSearchParams(window.location.search);
-    tokenValue = urlParams.get('token');
+    code = urlParams.get('code');
     type = urlParams.get('type');
     
     // If not in query params, check hash fragment
-    if (!tokenValue && window.location.hash) {
+    if (!code && window.location.hash) {
       const hashParams = new URLSearchParams(window.location.hash.substring(1));
-      tokenValue = hashParams.get('token');
+      code = hashParams.get('code');
       type = hashParams.get('type');
     }
     
-    console.log('Parsed params:', { tokenValue, type });
+    console.log('Parsed params:', { code, type });
     
-    if (tokenValue && type === 'recovery') {
-      setToken(tokenValue);
+    if (code && type === 'recovery') {
+      // Store the code - we'll exchange it for a session when user submits the form
+      setToken(code);
       
       // If on mobile device, automatically try to open the app
       if (isMobileDevice()) {
         console.log('Mobile device detected, redirecting to app...');
         // Give a small delay to show the page briefly, then redirect
         setTimeout(() => {
-          // Try to open the app with the token
-          window.location.href = `proapp://reset-password?token=${tokenValue}&type=recovery`;
+          // Try to open the app with the code
+          window.location.href = `proapp://reset-password?code=${code}&type=recovery`;
         }, 800);
       }
     } else {
@@ -66,7 +67,7 @@ Debug info:
 - URL: ${window.location.href}
 - Search: ${window.location.search}
 - Hash: ${window.location.hash}
-- Token found: ${tokenValue ? 'Yes' : 'No'}
+- Code found: ${code ? 'Yes' : 'No'}
 - Type: ${type || 'Not found'}`;
       
       setError(errorMsg);
@@ -91,15 +92,16 @@ Debug info:
     setLoading(true);
 
     try {
-      // Set the session with the recovery token
-      const { error: sessionError } = await supabase.auth.setSession({
-        access_token: token!,
-        refresh_token: token!,
-      });
-
+      // Exchange the code for a session (PKCE flow)
+      console.log('Exchanging code for session...');
+      const { error: sessionError } = await supabase.auth.exchangeCodeForSession(token!);
+      
       if (sessionError) {
+        console.error('Session error:', sessionError);
         throw sessionError;
       }
+
+      console.log('Session created successfully');
 
       // Update the password
       const { error: updateError } = await supabase.auth.updateUser({
@@ -107,9 +109,11 @@ Debug info:
       });
 
       if (updateError) {
+        console.error('Update error:', updateError);
         throw updateError;
       }
 
+      console.log('Password updated successfully');
       setSuccess('Password updated successfully! Redirecting to login...');
       
       // Sign out and redirect to login
@@ -118,6 +122,7 @@ Debug info:
         router.push('/login');
       }, 2000);
     } catch (err: any) {
+      console.error('Error:', err);
       setError(err.message || 'Failed to update password');
     } finally {
       setLoading(false);
