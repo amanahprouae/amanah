@@ -15,93 +15,40 @@ export default function ResetPasswordPage() {
   const [sessionReady, setSessionReady] = useState(false);
 
   useEffect(() => {
-    let mounted = true;
+  let mounted = true;
 
-    const handleAuth = async () => {
-  console.log('Reset page URL:', window.location.href);
+  async function checkSession() {
+    const {
+      data: { session },
+      error,
+    } = await supabase.auth.getSession();
 
-  const code = new URLSearchParams(window.location.search).get('code');
+    if (!mounted) return;
 
-  if (code) {
-    console.log('Exchanging recovery code...');
-
-    const { error: exchangeError } =
-      await supabase.auth.exchangeCodeForSession(code);
-
-    if (exchangeError) {
-      console.error('Exchange error:', exchangeError);
-      setError(exchangeError.message);
+    if (error) {
+      setError(error.message);
       setLoading(false);
       return;
     }
 
-    console.log('Recovery code exchanged successfully.');
+    if (!session) {
+      setError(
+        'Invalid or expired password reset link. Please request a new one.'
+      );
+      setLoading(false);
+      return;
+    }
+
+    setSessionReady(true);
+    setLoading(false);
   }
 
-  const { data, error } = await supabase.auth.getSession();
-  console.log('Initial session:', data.session);
-  console.log('Initial session error:', error);
+  checkSession();
 
-      if (!mounted) return;
-
-      if (error) {
-        setError(error.message);
-        setLoading(false);
-        return;
-      }
-
-      if (data.session) {
-        setSessionReady(true);
-        setLoading(false);
-        return;
-      }
-
-      const {
-        data: { subscription },
-      } = supabase.auth.onAuthStateChange((event, session) => {
-        console.log('Auth event:', event);
-        console.log('Auth session:', session);
-
-        if (!mounted) return;
-
-        if (event === 'PASSWORD_RECOVERY') {
-          setSessionReady(true);
-          setLoading(false);
-          setError('');
-          return;
-        }
-
-        if (session && (event === 'SIGNED_IN' || event === 'INITIAL_SESSION')) {
-          setSessionReady(true);
-          setLoading(false);
-          setError('');
-          return;
-        }
-      });
-
-      const timeout = setTimeout(() => {
-        if (!mounted) return;
-        setLoading(false);
-        setError('Invalid or expired password reset link. Please request a new one.');
-      }, 6000);
-
-      return () => {
-        clearTimeout(timeout);
-        subscription.unsubscribe();
-      };
-    };
-
-    let cleanup: void | (() => void) = undefined;
-
-    handleAuth().then((fn) => {
-      cleanup = fn;
-    });
-
-    return () => {
-      mounted = false;
-      if (typeof cleanup === 'function') cleanup();
-    };
-  }, []);
+  return () => {
+    mounted = false;
+  };
+}, []);
 
   const validatePassword = (pwd: string): string | null => {
     if (pwd.length < 8) return 'Password must be at least 8 characters';

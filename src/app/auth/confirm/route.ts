@@ -1,41 +1,64 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { createServerClient } from '@supabase/ssr';
+import { cookies } from 'next/headers';
 import { type EmailOtpType } from '@supabase/supabase-js';
-import { NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase-server';
 
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
   const { searchParams, origin } = new URL(request.url);
 
   const token_hash = searchParams.get('token_hash');
   const type = searchParams.get('type') as EmailOtpType | null;
   const next = searchParams.get('next') ?? '/';
 
-  if (token_hash && type) {
-    const supabase = await createClient();
-
-    const { data, error } = await supabase.auth.verifyOtp({
-      type,
-      token_hash,
-    });
-
-    console.log('verifyOtp result:', {
-      data,
-      error,
-    });
-
-    if (error) {
-      console.error('verifyOtp failed:', error);
-
-      return NextResponse.redirect(
-        `${origin}/login?error=${encodeURIComponent(error.message)}`
-      );
-    }
-
-    console.log('verifyOtp succeeded');
-
-    return NextResponse.redirect(`${origin}${next}`);
+  if (!token_hash || !type) {
+    return NextResponse.redirect(
+      `${origin}/login?error=${encodeURIComponent(
+        'Missing recovery token.'
+      )}`
+    );
   }
 
-  return NextResponse.redirect(
-    `${origin}/login?error=Missing token or recovery type`
+  const cookieStore = await cookies();
+
+  let response = NextResponse.redirect(`${origin}${next}`);
+
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return cookieStore.getAll();
+        },
+
+        setAll(cookiesToSet) {
+          cookiesToSet.forEach(({ name, value, options }) => {
+            response.cookies.set(name, value, options);
+          });
+        },
+      },
+    }
   );
+
+  const { data, error } = await supabase.auth.verifyOtp({
+    type,
+    token_hash,
+  });
+
+  console.log('verifyOtp result:', {
+    data,
+    error,
+  });
+
+  if (error) {
+    console.error('verifyOtp failed:', error);
+
+    return NextResponse.redirect(
+      `${origin}/login?error=${encodeURIComponent(error.message)}`
+    );
+  }
+
+  console.log('verifyOtp succeeded');
+
+  return response;
 }
