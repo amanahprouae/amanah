@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/components/providers';
 
@@ -48,7 +49,7 @@ function AdminLayoutInner({ children }: { children: React.ReactNode }) {
       <div className="flex h-screen w-screen items-center justify-center bg-background">
         <div className="flex flex-col items-center gap-3">
           <div className="h-10 w-10 animate-spin rounded-full border-4 border-primary border-t-transparent"></div>
-          <p className="text-body-md font-medium text-secondary">Loading PRO Services Portal...</p>
+          <p className="text-body-md font-medium text-secondary">Loading Amanah Portal...</p>
         </div>
       </div>
     );
@@ -60,11 +61,17 @@ function AdminLayoutInner({ children }: { children: React.ReactNode }) {
       <aside className="fixed left-0 top-0 h-screen w-72 bg-secondary flex flex-col shadow-md z-50 text-white">
         {/* Brand Header */}
         <div className="px-lg py-xl flex items-center gap-3">
-          <div className="w-10 h-10 bg-primary-container rounded-lg flex items-center justify-center text-white font-black text-xl">
-            PRO
+          <div className="w-10 h-10 flex items-center justify-center shrink-0 bg-white rounded-xl overflow-hidden p-1 shadow-sm">
+            <Image
+              src="/Amanah.svg"
+              alt="Amanah"
+              width={32}
+              height={32}
+              className="object-contain w-full h-full"
+            />
           </div>
           <div className="flex flex-col">
-            <span className="font-headline-md text-headline-md font-bold leading-tight">PRO Services</span>
+            <span className="font-headline-md text-headline-md font-bold leading-tight">Amanah</span>
             <span className="text-secondary-fixed-dim/60 font-label-sm uppercase tracking-wider text-[10px]">
               Enterprise Admin
             </span>

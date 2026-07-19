@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, Suspense } from 'react';
+import Image from 'next/image';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -86,11 +87,17 @@ function LoginForm() {
     <div className="min-h-screen flex items-center justify-center bg-bg-subtle p-6">
       <div className="w-full max-w-md bg-white border border-border-subtle rounded-2xl shadow-xl overflow-hidden p-8">
         <div className="flex flex-col items-center mb-8">
-          <div className="w-12 h-12 bg-primary-container rounded-xl flex items-center justify-center text-white font-black text-2xl mb-4">
-            PRO
+          <div className="w-20 h-20 flex items-center justify-center mb-4 bg-white rounded-2xl shadow-md p-2 border border-border-subtle">
+            <Image
+              src="/Amanah.svg"
+              alt="Amanah"
+              width={64}
+              height={64}
+              className="object-contain w-full h-full"
+            />
           </div>
           <h1 className="text-headline-lg font-bold text-on-surface">Admin Portal</h1>
-          <p className="text-body-sm text-on-surface-variant">UAE PRO Services Management Panel</p>
+          <p className="text-body-sm font-semibold tracking-wide text-primary uppercase">All Your Documents, One Platform</p>
         </div>
 
         {errorMsg && (
