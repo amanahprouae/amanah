@@ -8,9 +8,6 @@
   external_node_modules = ["@opentelemetry/api"]
   node_bundler = "esbuild"
 
-[edge_functions]
-  external_node_modules = ["@opentelemetry/api"]
-
 # Environment variables
 [build.environment]
   NODE_VERSION = "20"
