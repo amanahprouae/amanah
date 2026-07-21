@@ -2,6 +2,9 @@ import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
 export async function middleware(request: NextRequest) {
+  const startTime = Date.now();
+  console.log(`[MIDDLEWARE] 🚀 Starting: ${request.method} ${request.nextUrl.pathname}`);
+
   let response = NextResponse.next({
     request,
   });
@@ -18,11 +21,7 @@ export async function middleware(request: NextRequest) {
         setAll(cookiesToSet) {
           cookiesToSet.forEach(({ name, value, options }) => {
             request.cookies.set(name, value);
-
-            response = NextResponse.next({
-              request,
-            });
-
+            // ✅ Fixed: Use the existing response object instead of creating new ones
             response.cookies.set(name, value, options);
           });
         },
@@ -30,9 +29,14 @@ export async function middleware(request: NextRequest) {
     }
   );
 
-  // This refreshes the auth session if needed and ensures
-  // auth cookies are written to the response.
-  await supabase.auth.getUser();
+  try {
+    // This refreshes the auth session if needed and ensures
+    // auth cookies are written to the response.
+    await supabase.auth.getUser();
+    console.log(`[MIDDLEWARE] ✅ Completed in ${Date.now() - startTime}ms`);
+  } catch (error) {
+    console.error(`[MIDDLEWARE] ❌ Error:`, error);
+  }
 
   return response;
 }
