@@ -2,6 +2,8 @@
 
 import React, { use, useState, useEffect } from 'react';
 import AdminLayout from '@/components/admin-layout';
+import { DndProvider, useDrag, useDrop } from 'react-dnd';
+import { HTML5Backend } from 'react-dnd-html5-backend';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { useForm } from 'react-hook-form';
@@ -98,10 +100,15 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
   const [editingEmployeeId, setEditingEmployeeId] = useState<string | null>(null);
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [photoFile, setPhotoFile] = useState<File | null>(null);
+  // Drag and Drop states
+  const [isDocDragActive, setIsDocDragActive] = useState(false);
+  const [docOrder, setDocOrder] = useState<string[]>([]);
+  const [isEmpDragActive, setIsEmpDragActive] = useState(false);
+  const [empOrder, setEmpOrder] = useState<string[]>([]);
   // Sorting states
-  const [documentsSort, setDocumentsSort] = useState<'alpha' | 'created' | 'expiry'>('alpha');
-  const [employeesSort, setEmployeesSort] = useState<'alpha' | 'created' | 'visa_expiry' | 'passport_expiry'>('alpha');
-  const [empDocsSort, setEmpDocsSort] = useState<'alpha' | 'created' | 'expiry'>('alpha');
+  const [documentsSort, setDocumentsSort] = useState<'default' | 'alpha' | 'created' | 'expiry' | 'visa' | 'passport' | 'labour'>('default');
+  const [employeesSort, setEmployeesSort] = useState<'default' | 'alpha' | 'created' | 'visa_expiry' | 'passport_expiry' | 'labour_card_expiry'>('default');
+  const [empDocsSort, setEmpDocsSort] = useState<'default' | 'alpha' | 'created' | 'expiry'>('default');
   const [documentsSortDir, setDocumentsSortDir] = useState<'asc' | 'desc'>('asc');
   const [employeesSortDir, setEmployeesSortDir] = useState<'asc' | 'desc'>('asc');
   const [empDocsSortDir, setEmpDocsSortDir] = useState<'asc' | 'desc'>('asc');
@@ -600,19 +607,6 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
     },
   });
 
-  // Fetch Company Documents
-  const { data: documents, isLoading: isDocsLoading } = useQuery({
-    queryKey: ['company-documents', companyId],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('company_documents')
-        .select('*, document_categories(name, code, category_group)')
-        .eq('company_id', companyId);
-      if (error) throw error;
-      return data || [];
-    },
-  });
-
   // Fetch Employee (relative) Documents for this company (used for individual/family summaries)
   const { data: employeeCompanyDocs } = useQuery({
     queryKey: ['company-employee-documents', companyId],
@@ -640,13 +634,20 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
         .from('employees')
         .select('*')
         .eq('company_id', companyId)
-        .order('first_name');
+        .order('order_index', { ascending: true });
       if (error) throw error;
       return data || [];
     },
   });
 
   const sortedEmployees = (employees || []).slice().sort((a: any, b: any) => {
+    if (isEmpDragActive && empOrder.length > 0) {
+      return empOrder.indexOf(a.id) - empOrder.indexOf(b.id);
+    }
+    // Default mode: use order_index (no direction toggle)
+    if (employeesSort === 'default') {
+      return (a.order_index || 0) - (b.order_index || 0);
+    }
     const dir = employeesSortDir === 'asc' ? 1 : -1;
     if (employeesSort === 'alpha') return `${a.first_name} ${a.last_name}`.localeCompare(`${b.first_name} ${b.last_name}`) * dir;
     
@@ -667,8 +668,72 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
       const bExpiry = getDocExpiry(b.id, 'passport') || (b.passport_expiry ? Date.parse(b.passport_expiry) : 0);
       return (aExpiry - bExpiry) * dir;
     }
-    return ((Date.parse(a.created_at || '') || 0) - (Date.parse(b.created_at || '') || 0)) * dir;
+    if (employeesSort === 'labour_card_expiry') {
+      const aExpiry = getDocExpiry(a.id, 'labour card') || (a.labor_card_expiry ? Date.parse(a.labor_card_expiry) : 0);
+      const bExpiry = getDocExpiry(b.id, 'labour card') || (b.labor_card_expiry ? Date.parse(b.labor_card_expiry) : 0);
+      return (aExpiry - bExpiry) * dir;
+    }
+    // Fallback to order_index
+    return ((a.order_index || 0) - (b.order_index || 0)) * dir;
   });
+
+  // Drag and Drop handlers for Employees
+  const moveEmpRow = (dragIndex: number, hoverIndex: number) => {
+    const newOrder = [...empOrder];
+    const draggedItem = sortedEmployees[dragIndex];
+    if (!draggedItem) return;
+    newOrder.splice(dragIndex, 1);
+    newOrder.splice(hoverIndex, 0, draggedItem.id);
+    setEmpOrder(newOrder);
+  };
+
+  const toggleEmpDragMode = () => {
+    if (employeesSort !== 'default') {
+      alert('Please switch to "Default Order" sorting to enable drag-and-drop reordering.');
+      return;
+    }
+    if (!isEmpDragActive) {
+      setEmpOrder(sortedEmployees.map(d => d.id));
+    }
+    setIsEmpDragActive(!isEmpDragActive);
+  };
+
+  const saveEmpOrder = async () => {
+    try {
+      // Update order_index for each employee
+      const updates = empOrder.map((id, index) => 
+        supabase.from('employees')
+          .update({ order_index: index })
+          .eq('id', id)
+          .then()
+      );
+      
+      await Promise.all(updates);
+      
+      // Invalidate query to refresh data
+      queryClient.invalidateQueries({ queryKey: ['company-employees', companyId] });
+      setIsEmpDragActive(false);
+      setEmpOrder([]);
+    } catch (error) {
+      console.error('Error saving employee order:', error);
+      alert('Failed to save employee order');
+    }
+  };
+
+  // Fetch Company Documents
+  const { data: documents, isLoading: isDocsLoading } = useQuery({
+    queryKey: ['company-documents', companyId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('company_documents')
+        .select('*, document_categories(name, code, category_group)')
+        .eq('company_id', companyId)
+        .order('order_index', { ascending: true });
+      if (error) throw error;
+      return data || [];
+    },
+  });
+
 
   // Fetch Document Categories
   const { data: categories } = useQuery({
@@ -789,12 +854,163 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
     return isNaN(t) ? 0 : t;
   };
 
+  const compareDocExpiryDates = (a: any, b: any, docType: string) => {
+    const aIsType = a.document_categories?.name?.toLowerCase().includes(docType.toLowerCase());
+    const bIsType = b.document_categories?.name?.toLowerCase().includes(docType.toLowerCase());
+
+    if (aIsType && !bIsType) return -1;
+    if (!aIsType && bIsType) return 1;
+    if (aIsType && bIsType) {
+      const aDate = a.expiry_date ? new Date(a.expiry_date).getTime() : 0;
+      const bDate = b.expiry_date ? new Date(b.expiry_date).getTime() : 0;
+      if (aDate === 0 && bDate !== 0) return 1;
+      if (aDate !== 0 && bDate === 0) return -1;
+      return aDate - bDate;
+    }
+    return 0;
+  };
+
+  // Drag and Drop handlers for Documents
+  const moveDocRow = (dragIndex: number, hoverIndex: number) => {
+    const newOrder = [...docOrder];
+    const draggedItem = sortedVisibleDocuments[dragIndex];
+    const hoverItem = sortedVisibleDocuments[hoverIndex];
+    
+    if (!draggedItem || !hoverItem) return;
+    
+    // Prevent dragging across different category groups
+    const draggedGroup = draggedItem.document_categories?.category_group || 'company';
+    const hoverGroup = hoverItem.document_categories?.category_group || 'company';
+    if (draggedGroup !== hoverGroup) {
+      return;
+    }
+    
+    newOrder.splice(dragIndex, 1);
+    newOrder.splice(hoverIndex, 0, draggedItem.id);
+    setDocOrder(newOrder);
+  };
+
+  const toggleDocDragMode = () => {
+    if (documentsSort !== 'default') {
+      alert('Please switch to "Default Order" sorting to enable drag-and-drop reordering.');
+      return;
+    }
+    if (!isDocDragActive) {
+      setDocOrder(sortedVisibleDocuments.map(d => d.id));
+    }
+    setIsDocDragActive(!isDocDragActive);
+  };
+
+  const saveDocOrder = async () => {
+    try {
+      // Group documents by category_group and assign order_index within each group
+      const groupOrder = { company: 0, partner: 1, employee: 2, family: 3, relative: 4 };
+      const groups: Record<string, any[]> = {};
+      
+      docOrder.forEach((id, index) => {
+        const doc = sortedVisibleDocuments.find(d => d.id === id);
+        if (doc) {
+          const group = doc.document_categories?.category_group || 'company';
+          if (!groups[group]) groups[group] = [];
+          groups[group].push({ doc, originalIndex: index });
+        }
+      });
+      
+      // Calculate order_index for each document within its group
+      const updates: any[] = [];
+      Object.keys(groups).forEach(group => {
+        const groupDocs = groups[group];
+        groupDocs.forEach(({ doc }, groupIndex) => {
+          // Calculate global order_index based on group position and position within group
+          const groupOffset = groupOrder[group as keyof typeof groupOrder] * 1000;
+          const finalOrderIndex = groupOffset + groupIndex;
+          
+          // Determine the correct table based on whether it's an employee document
+          const table = doc.employee_id ? 'employee_documents' : 'company_documents';
+          
+          updates.push(
+            supabase.from(table)
+              .update({ order_index: finalOrderIndex })
+              .eq('id', doc.id)
+          );
+        });
+      });
+      
+      await Promise.all(updates.map(u => u.then()));
+      
+      // Invalidate queries to refresh data
+      queryClient.invalidateQueries({ queryKey: ['company-documents', companyId] });
+      queryClient.invalidateQueries({ queryKey: ['company-employee-documents', companyId] });
+      setIsDocDragActive(false);
+    } catch (error) {
+      console.error('Error saving document order:', error);
+      alert('Failed to save document order');
+    }
+  };
+
   const sortedVisibleDocuments = (visibleCompanyDocuments || []).slice().sort((a: any, b: any) => {
+    if (isDocDragActive && docOrder.length > 0) {
+      return docOrder.indexOf(a.id) - docOrder.indexOf(b.id);
+    }
+    
+    // Default mode: group by category_group and use order_index (no direction toggle)
+    if (documentsSort === 'default') {
+      const groupOrder = { company: 0, partner: 1, employee: 2, family: 3, relative: 4 };
+      const aGroup = a.document_categories?.category_group || 'company';
+      const bGroup = b.document_categories?.category_group || 'company';
+      const aGroupOrder = groupOrder[aGroup as keyof typeof groupOrder] ?? 99;
+      const bGroupOrder = groupOrder[bGroup as keyof typeof groupOrder] ?? 99;
+      
+      if (aGroupOrder !== bGroupOrder) {
+        return aGroupOrder - bGroupOrder;
+      }
+      
+      // Within 'partner' and 'relative' groups, sort by owner_name first
+      if (aGroup === 'partner' || aGroup === 'relative') {
+        const aOwner = a.owner_name || 'Unknown';
+        const bOwner = b.owner_name || 'Unknown';
+        if (aOwner !== bOwner) {
+          return aOwner.localeCompare(bOwner);
+        }
+      }
+      
+      // Within same group, use order_index
+      return (a.order_index || 0) - (b.order_index || 0);
+    }
+    
+    // Non-default modes: group by category_group first
+    const groupOrder = { company: 0, partner: 1, employee: 2, family: 3, relative: 4 };
+    const aGroup = a.document_categories?.category_group || 'company';
+    const bGroup = b.document_categories?.category_group || 'company';
+    const aGroupOrder = groupOrder[aGroup as keyof typeof groupOrder] ?? 99;
+    const bGroupOrder = groupOrder[bGroup as keyof typeof groupOrder] ?? 99;
+    
+    if (aGroupOrder !== bGroupOrder) {
+      return aGroupOrder - bGroupOrder;
+    }
+    
+    // Within 'partner' and 'relative' groups, sort by owner_name first
+    if (aGroup === 'partner' || aGroup === 'relative') {
+      const aOwner = a.owner_name || 'Unknown';
+      const bOwner = b.owner_name || 'Unknown';
+      if (aOwner !== bOwner) {
+        return aOwner.localeCompare(bOwner);
+      }
+    }
+    
+    // Within same group, use order_index if available
+    if (a.order_index !== undefined && b.order_index !== undefined && a.order_index !== b.order_index) {
+      return a.order_index - b.order_index;
+    }
+    
     const dir = documentsSortDir === 'asc' ? 1 : -1;
     if (documentsSort === 'alpha') return (a.file_name || '').localeCompare(b.file_name || '') * dir;
     if (documentsSort === 'expiry') return (((a.expiry_date ? Date.parse(a.expiry_date) : 0) - (b.expiry_date ? Date.parse(b.expiry_date) : 0))) * dir;
-    // created
-    return (((Date.parse(a.uploaded_at || a.created_at || a.issue_date || '') || 0) - (Date.parse(b.uploaded_at || b.created_at || b.issue_date || '') || 0))) * dir;
+    if (documentsSort === 'visa') return compareDocExpiryDates(a, b, 'visa') * dir;
+    if (documentsSort === 'passport') return compareDocExpiryDates(a, b, 'passport') * dir;
+    if (documentsSort === 'labour') return compareDocExpiryDates(a, b, 'labour card') * dir;
+    // Fallback to order_index
+    return ((a.order_index || 0) - (b.order_index || 0)) * dir;
   });
   const documentFilterLabel =
     company?.entity_type === 'individual'
@@ -979,6 +1195,10 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
 
         if (storageError) throw storageError;
 
+        // Get the relative's name for owner_name
+        const selectedRelative = employees?.find((emp: any) => emp.id === uploadRelativeEmployeeId);
+        const ownerName = selectedRelative ? `${selectedRelative.first_name} ${selectedRelative.last_name}` : null;
+
         const { error: dbError } = await supabase.from('employee_documents').insert([
           {
             employee_id: uploadRelativeEmployeeId,
@@ -988,6 +1208,7 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
             size_bytes: fileSize,
             issue_date: uploadIssue || null,
             expiry_date: uploadExpiry || null,
+            owner_name: ownerName,
             status: 'active',
           },
         ]);
@@ -1125,7 +1346,7 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
         .from('employee_documents')
         .select('*, document_categories(name, category_group)')
         .eq('employee_id', managedEmployee.id)
-        .order('uploaded_at', { ascending: false });
+        .order('order_index', { ascending: true });
       if (error) throw error;
       return data || [];
     },
@@ -1200,6 +1421,7 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
       if (storageError) throw storageError;
 
       // 2. Insert record metadata to Database
+      const ownerName = `${managedEmployee.first_name} ${managedEmployee.last_name}`;
       const { error: dbError } = await supabase.from('employee_documents').insert([
         {
           employee_id: managedEmployee.id,
@@ -1209,6 +1431,7 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
           size_bytes: fileSize,
           issue_date: empDocIssue || null,
           expiry_date: empDocExpiry || null,
+          owner_name: ownerName,
           status: 'active',
         },
       ]);
@@ -1625,17 +1848,51 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
         {/* Documents Tab Content */}
         {activeTab === 'documents' && (
           <div className="space-y-md">
+            <div className="bg-white p-md rounded-xl border border-border-subtle shadow-sm flex justify-between items-center">
+              <div className="flex items-center gap-4">
+                <h3 className="font-semibold text-on-surface text-sm">Document Ordering</h3>
+                <button
+                  onClick={toggleDocDragMode}
+                  className={`px-3 py-1.5 rounded-lg font-medium text-xs transition-colors ${isDocDragActive ? 'bg-danger/10 text-danger' : 'bg-primary/10 text-primary'}`}
+                >
+                  {isDocDragActive ? 'Cancel Reordering' : 'Change Order'}
+                </button>
+                {isDocDragActive && (
+                  <button
+                    onClick={saveDocOrder}
+                    className="px-3 py-1.5 bg-success/10 text-success rounded-lg font-medium text-xs hover:bg-success/20 transition-colors"
+                  >
+                    Save New Order
+                  </button>
+                )}
+              </div>
+              {isDocDragActive && (
+                <p className="text-xs text-on-surface-variant">Drag and drop documents to reorder them.</p>
+              )}
+            </div>
+
             <div className="bg-white rounded-2xl border border-border-subtle shadow-sm overflow-hidden">
               <div className="p-lg border-b border-border-subtle flex flex-col md:flex-row md:justify-between md:items-center gap-md bg-bg-subtle">
-                <div>
-                  <h3 className="font-title-md text-title-md text-on-surface">{documentFilterLabel}</h3>
-                  {documentSummaryFilter !== 'all' && (
-                    <p className="text-xs text-on-surface-variant mt-1">
-                      Showing documents selected from overview summary.
-                    </p>
-                  )}
+                <div className="flex items-center gap-3">
+                  <div>
+                    <h3 className="font-title-md text-title-md text-on-surface">{documentFilterLabel}</h3>
+                    {documentSummaryFilter !== 'all' && (
+                      <p className="text-xs text-on-surface-variant mt-1">
+                        Showing documents selected from overview summary.
+                      </p>
+                    )}
+                  </div>
+                  <select
+                    value={documentSummaryFilter}
+                    onChange={(e) => setDocumentSummaryFilter(e.target.value as DocumentSummaryFilter)}
+                    className="bg-white border border-border-subtle rounded-lg px-md py-2 text-xs focus:ring-primary"
+                  >
+                    <option value="all">All Documents</option>
+                    <option value="company">{company?.entity_type === 'individual' ? 'Sponsor Documents' : 'Company Documents'}</option>
+                    <option value="partner">{company?.entity_type === 'individual' ? 'Relative Documents' : 'Partner Documents'}</option>
+                  </select>
                   {company?.entity_type !== 'individual' && documentSummaryFilter === 'partner' && (
-                    <div className="mt-3 flex flex-wrap gap-2">
+                    <div className="flex flex-wrap gap-2">
                       <button
                         type="button"
                         onClick={() => setSelectedPartnerOwnerFilter('all')}
@@ -1663,26 +1920,23 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
                       onChange={(e) => setDocumentsSort(e.target.value as any)}
                       className="bg-white border border-border-subtle rounded-lg px-2 py-1 text-xs"
                     >
+                      <option value="default">Default Order</option>
                       <option value="alpha">Alphabetical</option>
                       <option value="created">Date Created</option>
                       <option value="expiry">Expiry Date</option>
+                      <option value="visa">Visa Expiry</option>
+                      <option value="passport">Passport Expiry</option>
+                      <option value="labour">Labour Card Expiry</option>
                     </select>
                     <button
                       onClick={() => setDocumentsSortDir(documentsSortDir === 'asc' ? 'desc' : 'asc')}
-                      className="px-2 py-1 bg-white border border-border-subtle rounded-lg text-xs"
-                      title="Toggle sort direction"
+                      disabled={documentsSort === 'default'}
+                      className={`px-2 py-1 border border-border-subtle rounded-lg text-xs ${documentsSort === 'default' ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-white hover:bg-surface-container-low'}`}
+                      title={documentsSort === 'default' ? 'Direction toggle disabled in Default Order mode' : 'Toggle sort direction'}
                     >
                       {documentsSortDir === 'asc' ? 'Asc' : 'Desc'}
                     </button>
                   </div>
-                  {documentSummaryFilter !== 'all' && (
-                    <button
-                      onClick={() => setDocumentSummaryFilter('all')}
-                      className="px-md py-1.5 bg-white border border-border-subtle text-on-surface text-xs font-semibold rounded-lg hover:bg-surface-container-low cursor-pointer"
-                    >
-                      Show All
-                    </button>
-                  )}
                   <button
                     onClick={() => {
                       if (company?.entity_type === 'individual') {
@@ -1708,78 +1962,201 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
                       <th className="p-lg text-right">Actions</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-border-subtle font-body-sm text-on-surface">
-                    {isDocsLoading ? (
-                      <tr>
-                        <td colSpan={6} className="p-xl text-center">Loading files...</td>
-                      </tr>
-                    ) : sortedVisibleDocuments.length > 0 ? (
-                      sortedVisibleDocuments.map((doc) => {
-                        const isExpired = doc.expiry_date && new Date(doc.expiry_date) < new Date();
-                        const isSoon = doc.expiry_date && !isExpired && new Date(doc.expiry_date) < new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
-
+                      {isDocDragActive ? (
+                        <DndProvider backend={HTML5Backend}>
+                      <tbody className="divide-y divide-border-subtle font-body-sm text-on-surface">
+                        {(() => {
+                          const groupNames = { company: 'Company Documents', partner: 'Partner Documents', employee: 'Employee Documents', family: 'Family Documents', relative: 'Relative Documents' };
+                          let lastGroup: string | null = null;
+                          let lastOwner: string | null = null;
+                          
+                          return sortedVisibleDocuments.map((doc, index) => {
+                            const currentGroup = doc.document_categories?.category_group || 'company';
+                            const showGroupHeader = currentGroup !== lastGroup;
+                            const isPartnerOrRelativeGroup = currentGroup === 'partner' || currentGroup === 'relative';
+                            
+                            // For relative documents, use employee name from joined data if available
+                            let currentOwner = 'Unknown';
+                            if (currentGroup === 'relative' && doc.employees) {
+                              currentOwner = `${doc.employees.first_name} ${doc.employees.last_name}`;
+                            } else if (doc.owner_name) {
+                              currentOwner = doc.owner_name;
+                            }
+                            
+                            const showOwnerHeader = isPartnerOrRelativeGroup && currentOwner !== lastOwner;
+                            
+                            if (showGroupHeader) {
+                              lastGroup = currentGroup;
+                              lastOwner = null;
+                            }
+                            if (isPartnerOrRelativeGroup && showOwnerHeader) {
+                              lastOwner = currentOwner;
+                            }
+                    
                         return (
-                          <tr key={doc.id} className="hover:bg-surface-container-lowest transition-colors">
-                            <td className="p-lg font-bold">{doc.file_name}</td>
-                            <td className="p-lg text-on-surface-variant font-medium">
-                              {doc.document_categories?.name || 'Other'}
-                            </td>
-                            <td className="p-lg text-on-surface-variant">{(doc.size_bytes / (1024 * 1024)).toFixed(2)} MB</td>
-                            <td className="p-lg">
-                              <div className="flex flex-col text-xs text-on-surface-variant font-medium">
-                                <span>Issue: {doc.issue_date ? new Date(doc.issue_date).toLocaleDateString() : 'N/A'}</span>
-                                <span className={isExpired ? 'text-danger font-bold' : isSoon ? 'text-warning font-bold' : ''}>
-                                  Expiry: {doc.expiry_date ? new Date(doc.expiry_date).toLocaleDateString() : 'No Expiry'}
-                                </span>
-                              </div>
-                            </td>
-                            <td className="p-lg">
-                              <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase ${isExpired ? 'bg-danger/10 text-danger' : isSoon ? 'bg-warning/10 text-warning' : 'bg-success/10 text-success'
-                                }`}>
-                                <span className={`w-1 h-1 rounded-full ${isExpired ? 'bg-danger' : isSoon ? 'bg-warning' : 'bg-success'
-                                  }`}></span>
-                                {isExpired ? 'Expired' : isSoon ? 'Expiring Soon' : 'Active'}
-                              </span>
-                            </td>
-                            <td className="p-lg text-right whitespace-nowrap">
-                              <div className="flex items-center justify-end gap-2">
-                                <button
-                                  onClick={() => doc.employee_id ? handleViewEmpDoc(doc.file_path) : handleViewDoc(doc.file_path)}
-                                  className="inline-flex items-center justify-center w-[76px] px-2.5 py-1 text-xs font-semibold border border-border-subtle text-primary rounded-lg hover:bg-primary/5 transition-colors cursor-pointer"
-                                >
-                                  Open
-                                </button>
-                                <button
-                                  onClick={() => doc.employee_id ? handleOpenEditEmpDocModal(doc) : handleOpenEditDocModal(doc)}
-                                  className="inline-flex items-center justify-center w-[76px] px-2.5 py-1 text-xs font-semibold border border-border-subtle text-on-surface rounded-lg hover:bg-surface-container transition-colors cursor-pointer"
-                                >
-                                  Edit
-                                </button>
-                                <button
-                                  onClick={() => {
-                                    if (confirm('Are you sure you want to delete this document?')) {
-                                      if (doc.employee_id) {
-                                        deleteEmpDocMutation.mutate({ id: doc.id, filePath: doc.file_path });
-                                      } else {
-                                        deleteDocMutation.mutate({ id: doc.id, filePath: doc.file_path });
-                                      }
-                                    }
-                                  }}
-                                  className="inline-flex items-center justify-center w-[76px] px-2.5 py-1 text-xs font-semibold border border-danger/20 text-danger rounded-lg hover:bg-danger/5 transition-colors cursor-pointer"
-                                >
-                                  Delete
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
+                          <React.Fragment key={doc.id}>
+                            {showGroupHeader && (
+                              <tr className="bg-primary/10 border-b-2 border-primary">
+                                <td colSpan={6} className="p-sm font-bold text-primary uppercase text-xs tracking-wider">
+                                  {groupNames[currentGroup as keyof typeof groupNames] || currentGroup}
+                                  <span className="ml-2 text-[10px] text-on-surface-variant normal-case tracking-normal">(drag within this group only)</span>
+                                </td>
+                              </tr>
+                            )}
+                            {showOwnerHeader && (
+                              <tr className="bg-warning/10 border-b-2 border-warning">
+                                <td colSpan={6} className="p-sm font-bold text-warning uppercase text-xs tracking-wider">
+                                  {currentOwner}
+                                </td>
+                              </tr>
+                            )}
+                            <DraggableDocRow doc={doc} index={index} moveRow={moveDocRow} />
+                          </React.Fragment>
                         );
-                      })
-                    ) : (
-                      <tr>
-                        <td colSpan={6} className="p-xl text-center text-on-surface-variant">No documents registered.</td>
-                      </tr>
-                    )}
+                      });
+                    })()}
                   </tbody>
+                    </DndProvider>
+                  ) : (
+                    <tbody className="divide-y divide-border-subtle font-body-sm text-on-surface">
+                      {isDocsLoading ? (
+                        <tr>
+                          <td colSpan={6} className="p-xl text-center">Loading files...</td>
+                        </tr>
+                      ) : sortedVisibleDocuments.length > 0 ? (
+                        (() => {
+                          // Group documents by category_group, and for 'relative' group, further group by owner_name
+                          const groupNames = { company: 'Company Documents', partner: 'Partner Documents', employee: 'Employee Documents', family: 'Family Documents', relative: 'Relative Documents' };
+                          const groups: Record<string, any[]> = {};
+                          sortedVisibleDocuments.forEach((doc) => {
+                            const group = doc.document_categories?.category_group || 'company';
+                            if (!groups[group]) groups[group] = [];
+                            groups[group].push(doc);
+                          });
+                          
+                          // Sort groups by predefined order
+                          const groupOrder = ['company', 'partner', 'employee', 'family', 'relative'];
+                          const sortedKeys = groupOrder.filter(key => groups[key]);
+                          
+                          const renderDocRow = (doc: any) => {
+                            const isExpired = doc.expiry_date && new Date(doc.expiry_date) < new Date();
+                            const isSoon = doc.expiry_date && !isExpired && new Date(doc.expiry_date) < new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+
+                            return (
+                              <tr key={doc.id} className="hover:bg-surface-container-lowest transition-colors">
+                                <td className="p-lg font-bold">{doc.file_name}</td>
+                                <td className="p-lg text-on-surface-variant font-medium">
+                                  {doc.document_categories?.name || 'Other'}
+                                </td>
+                                <td className="p-lg text-on-surface-variant">{(doc.size_bytes / (1024 * 1024)).toFixed(2)} MB</td>
+                                <td className="p-lg">
+                                  <div className="flex flex-col text-xs text-on-surface-variant font-medium">
+                                    <span>Issue: {doc.issue_date ? new Date(doc.issue_date).toLocaleDateString() : 'N/A'}</span>
+                                    <span className={isExpired ? 'text-danger font-bold' : isSoon ? 'text-warning font-bold' : ''}>
+                                      Expiry: {doc.expiry_date ? new Date(doc.expiry_date).toLocaleDateString() : 'No Expiry'}
+                                    </span>
+                                  </div>
+                                </td>
+                                <td className="p-lg">
+                                  <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase ${isExpired ? 'bg-danger/10 text-danger' : isSoon ? 'bg-warning/10 text-warning' : 'bg-success/10 text-success'}`}>
+                                    <span className={`w-1 h-1 rounded-full ${isExpired ? 'bg-danger' : isSoon ? 'bg-warning' : 'bg-success'}`}></span>
+                                    {isExpired ? 'Expired' : isSoon ? 'Expiring Soon' : 'Active'}
+                                  </span>
+                                </td>
+                                <td className="p-lg text-right whitespace-nowrap">
+                                  <div className="flex items-center justify-end gap-2">
+                                    <button
+                                      onClick={() => doc.employee_id ? handleViewEmpDoc(doc.file_path) : handleViewDoc(doc.file_path)}
+                                      className="inline-flex items-center justify-center w-[76px] px-2.5 py-1 text-xs font-semibold border border-border-subtle text-primary rounded-lg hover:bg-primary/5 transition-colors cursor-pointer"
+                                    >
+                                      Open
+                                    </button>
+                                    <button
+                                      onClick={() => doc.employee_id ? handleOpenEditEmpDocModal(doc) : handleOpenEditDocModal(doc)}
+                                      className="inline-flex items-center justify-center w-[76px] px-2.5 py-1 text-xs font-semibold border border-border-subtle text-on-surface rounded-lg hover:bg-surface-container transition-colors cursor-pointer"
+                                    >
+                                      Edit
+                                    </button>
+                                    <button
+                                      onClick={() => {
+                                        if (confirm('Are you sure you want to delete this document?')) {
+                                          if (doc.employee_id) {
+                                            deleteEmpDocMutation.mutate({ id: doc.id, filePath: doc.file_path });
+                                          } else {
+                                            deleteDocMutation.mutate({ id: doc.id, filePath: doc.file_path });
+                                          }
+                                        }
+                                      }}
+                                      className="inline-flex items-center justify-center w-[76px] px-2.5 py-1 text-xs font-semibold border border-danger/20 text-danger rounded-lg hover:bg-danger/5 transition-colors cursor-pointer"
+                                    >
+                                      Delete
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          };
+                          
+                          return sortedKeys.map((groupKey) => {
+                            const groupDocs = groups[groupKey];
+                            
+                            // For partner and relative groups, further group by owner_name or employee name
+                            if (groupKey === 'partner' || groupKey === 'relative') {
+                              const ownerGroups: Record<string, any[]> = {};
+                              groupDocs.forEach((doc) => {
+                                // For relative documents, use employee name from joined data if available
+                                let owner = 'Unknown';
+                                if (groupKey === 'relative' && doc.employees) {
+                                  owner = `${doc.employees.first_name} ${doc.employees.last_name}`;
+                                } else if (doc.owner_name) {
+                                  owner = doc.owner_name;
+                                }
+                                if (!ownerGroups[owner]) ownerGroups[owner] = [];
+                                ownerGroups[owner].push(doc);
+                              });
+                              
+                              const sortedOwners = Object.keys(ownerGroups).sort();
+                              
+                              return (
+                                <React.Fragment key={groupKey}>
+                                  <tr>
+                                    <td colSpan={6} className="p-sm bg-primary/5 font-bold text-primary uppercase text-xs tracking-wider border-b border-border-subtle">
+                                      {groupNames[groupKey as keyof typeof groupNames] || groupKey}
+                                    </td>
+                                  </tr>
+                                  {sortedOwners.map((owner) => (
+                                    <React.Fragment key={owner}>
+                                      <tr>
+                                        <td colSpan={6} className="p-sm bg-warning/10 font-bold text-warning uppercase text-xs tracking-wider border-b border-warning">
+                                          {owner}
+                                        </td>
+                                      </tr>
+                                      {ownerGroups[owner].map(renderDocRow)}
+                                    </React.Fragment>
+                                  ))}
+                                </React.Fragment>
+                              );
+                            }
+                            
+                            return (
+                              <React.Fragment key={groupKey}>
+                                <tr>
+                                  <td colSpan={6} className="p-sm bg-primary/5 font-bold text-primary uppercase text-xs tracking-wider border-b border-border-subtle">
+                                    {groupNames[groupKey as keyof typeof groupNames] || groupKey}
+                                  </td>
+                                </tr>
+                                {groupDocs.map(renderDocRow)}
+                              </React.Fragment>
+                            );
+                          });
+                        })()
+                      ) : (
+                        <tr>
+                          <td colSpan={6} className="p-xl text-center text-on-surface-variant">No documents registered.</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  )}
                 </table>
               </div>
             </div>
@@ -1789,6 +2166,28 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
         {/* Employees Tab Content */}
         {activeTab === 'employees' && (
           <div className="space-y-md">
+            <div className="bg-white p-md rounded-xl border border-border-subtle shadow-sm flex justify-between items-center">
+              <div className="flex items-center gap-4">
+                <h3 className="font-semibold text-on-surface text-sm">Employee Ordering</h3>
+                <button
+                  onClick={toggleEmpDragMode}
+                  className={`px-3 py-1.5 rounded-lg font-medium text-xs transition-colors ${isEmpDragActive ? 'bg-danger/10 text-danger' : 'bg-primary/10 text-primary'}`}
+                >
+                  {isEmpDragActive ? 'Cancel Reordering' : 'Change Order'}
+                </button>
+                {isEmpDragActive && (
+                  <button
+                    onClick={saveEmpOrder}
+                    className="px-3 py-1.5 bg-success/10 text-success rounded-lg font-medium text-xs hover:bg-success/20 transition-colors"
+                  >
+                    Save New Order
+                  </button>
+                )}
+              </div>
+              {isEmpDragActive && (
+                <p className="text-xs text-on-surface-variant">Drag and drop to reorder.</p>
+              )}
+            </div>
             <div className="bg-white rounded-2xl border border-border-subtle shadow-sm overflow-hidden">
               <div className="p-lg border-b border-border-subtle flex justify-between items-center bg-bg-subtle">
                 <h3 className="font-title-md text-title-md text-on-surface">
@@ -1801,15 +2200,18 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
                       onChange={(e) => setEmployeesSort(e.target.value as any)}
                       className="bg-white border border-border-subtle rounded-lg px-2 py-1 text-xs"
                     >
+                      <option value="default">Default Order</option>
                       <option value="alpha">Alphabetical</option>
                       <option value="created">Date Created</option>
                       <option value="visa_expiry">Visa Expiry</option>
                       <option value="passport_expiry">Passport Expiry</option>
+                      <option value="labour_card_expiry">Labour Card Expiry</option>
                     </select>
                     <button
                       onClick={() => setEmployeesSortDir(employeesSortDir === 'asc' ? 'desc' : 'asc')}
-                      className="px-2 py-1 bg-white border border-border-subtle rounded-lg text-xs"
-                      title="Toggle sort direction"
+                      disabled={employeesSort === 'default'}
+                      className={`px-2 py-1 border border-border-subtle rounded-lg text-xs ${employeesSort === 'default' ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-white hover:bg-surface-container-low'}`}
+                      title={employeesSort === 'default' ? 'Direction toggle disabled in Default Order mode' : 'Toggle sort direction'}
                     >
                       {employeesSortDir === 'asc' ? 'Asc' : 'Desc'}
                     </button>
@@ -1829,97 +2231,124 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
                       <th className="p-lg">Name</th>
                       <th className="p-lg">{company?.entity_type === 'individual' ? 'Relationship' : 'Designation'}</th>
                       <th className="p-lg">Visa Expiry</th>
+                      <th className="p-lg">Labour Card Expiry</th>
                       <th className="p-lg">Passport Expiry</th>
                       <th className="p-lg text-center">Status</th>
                       <th className="p-lg text-right">Actions</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-border-subtle font-body-sm text-on-surface">
-                    {isEmployeesLoading ? (
-                      <tr>
-                        <td colSpan={6} className="p-xl text-center">
-                          {company?.entity_type === 'individual' ? 'Loading relative list...' : 'Loading employee list...'}
-                        </td>
-                      </tr>
-                    ) : sortedEmployees && sortedEmployees.length > 0 ? (
-                      sortedEmployees.map((emp) => {
-                        const empDocs = employeeCompanyDocs?.filter((d: any) => d.employee_id === emp.id) || [];
-                        const visaDoc = empDocs.find((d: any) => d.document_categories?.name?.toLowerCase().includes('visa'));
-                        const passportDoc = empDocs.find((d: any) => d.document_categories?.name?.toLowerCase().includes('passport'));
+                  {isEmpDragActive ? (
+                    <DndProvider backend={HTML5Backend}>
+                      <tbody className="divide-y divide-border-subtle font-body-sm text-on-surface">
+                        {sortedEmployees.map((emp, index) => (
+                          <DraggableEmpRow
+                            key={emp.id}
+                            emp={emp}
+                            index={index}
+                            moveRow={moveEmpRow}
+                            employeeCompanyDocs={employeeCompanyDocs}
+                            setManagedEmployee={setManagedEmployee}
+                            handleOpenEditEmployeeModal={handleOpenEditEmployeeModal}
+                            deleteEmployeeMutation={deleteEmployeeMutation} />
+                        ))}
+                      </tbody>
+                    </DndProvider>
+                  ) : (
+                    <tbody className="divide-y divide-border-subtle font-body-sm text-on-surface">
+                      {isEmployeesLoading ? (
+                        <tr>
+                          <td colSpan={7} className="p-xl text-center">
+                            {company?.entity_type === 'individual' ? 'Loading relative list...' : 'Loading employee list...'}
+                          </td>
+                        </tr>
+                      ) : sortedEmployees && sortedEmployees.length > 0 ? (
+                        sortedEmployees.map((emp) => {
+                          const empDocs = employeeCompanyDocs?.filter((d: any) => d.employee_id === emp.id) || [];
+                          const visaDoc = empDocs.find((d: any) => d.document_categories?.name?.toLowerCase().includes('visa'));
+                          const passportDoc = empDocs.find((d: any) => d.document_categories?.name?.toLowerCase().includes('passport'));
+                          const labourDoc = empDocs.find((d: any) => d.document_categories?.name?.toLowerCase().includes('labour card'));
 
-                        const derivedVisaExpiry = visaDoc?.expiry_date || emp.visa_expiry || null;
-                        const derivedPassportExpiry = passportDoc?.expiry_date || emp.passport_expiry || null;
+                          const derivedVisaExpiry = visaDoc?.expiry_date || emp.visa_expiry || null;
+                          const derivedPassportExpiry = passportDoc?.expiry_date || emp.passport_expiry || null;
+                          const derivedLabourCardExpiry = labourDoc?.expiry_date || emp.labor_card_expiry || null;
 
-                        const isVisaExpired = derivedVisaExpiry && new Date(derivedVisaExpiry) < new Date();
-                        const isPassportExpired = derivedPassportExpiry && new Date(derivedPassportExpiry) < new Date();
+                          const isVisaExpired = derivedVisaExpiry && new Date(derivedVisaExpiry) < new Date();
+                          const isPassportExpired = derivedPassportExpiry && new Date(derivedPassportExpiry) < new Date();
+                          const isLabourCardExpired = derivedLabourCardExpiry && new Date(derivedLabourCardExpiry) < new Date();
 
-                        const hasExpiredDoc = empDocs.some((d: any) => d.expiry_date && new Date(d.expiry_date) < new Date());
+                          const hasExpiredDoc = empDocs.some((d: any) => d.expiry_date && new Date(d.expiry_date) < new Date());
 
-                        return (
-                          <tr key={emp.id} className="hover:bg-surface-container-lowest transition-colors">
-                            <td className="p-lg font-bold">
-                              <div className="flex items-center">
-                                <span>
-                                  {emp.first_name} {emp.last_name}
+                          return (
+                            <tr key={emp.id} className="hover:bg-surface-container-lowest transition-colors">
+                              <td className="p-lg font-bold">
+                                <div className="flex items-center">
+                                  <span>
+                                    {emp.first_name} {emp.last_name}
+                                  </span>
+                                  {hasExpiredDoc && (
+                                    <span className="ml-2 w-2.5 h-2.5 bg-danger rounded-full inline-block" title="This employee has one or more expired documents."></span>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="p-lg text-on-surface-variant font-medium">{emp.designation}</td>
+                              <td className="p-lg">
+                                <span className={isVisaExpired ? 'text-danger font-bold' : ''}>
+                                  {derivedVisaExpiry ? new Date(derivedVisaExpiry).toLocaleDateString() : 'N/A'}
                                 </span>
-                                {hasExpiredDoc && (
-                                  <span className="ml-2 w-2.5 h-2.5 bg-danger rounded-full inline-block" title="This employee has one or more expired documents."></span>
-                                )}
-                              </div>
-                            </td>
-                            <td className="p-lg text-on-surface-variant font-medium">{emp.designation}</td>
-                            <td className="p-lg">
-                              <span className={isVisaExpired ? 'text-danger font-bold' : ''}>
-                                {derivedVisaExpiry ? new Date(derivedVisaExpiry).toLocaleDateString() : 'N/A'}
-                              </span>
-                            </td>
-                            <td className="p-lg">
-                              <span className={isPassportExpired ? 'text-danger font-bold' : ''}>
-                                {derivedPassportExpiry ? new Date(derivedPassportExpiry).toLocaleDateString() : 'N/A'}
-                              </span>
-                            </td>
-                            <td className="p-lg text-center">
-                              <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase ${emp.status === 'active' ? 'bg-success/10 text-success' : 'bg-danger/10 text-danger'
-                                }`}>
-                                <span className={`w-1 h-1 rounded-full ${emp.status === 'active' ? 'bg-success' : 'bg-danger'}`}></span>
-                                {emp.status}
-                              </span>
-                            </td>
-                            <td className="p-lg text-right whitespace-nowrap">
-                              <div className="flex items-center justify-end gap-2">
-                                <button
-                                  onClick={() => setManagedEmployee(emp)}
-                                  className="inline-flex items-center justify-center w-[106px] px-2.5 py-1 text-xs font-semibold border border-border-subtle text-primary rounded-lg hover:bg-primary/5 transition-colors cursor-pointer"
-                                >
-                                  Manage Docs
-                                </button>
-                                <button
-                                  onClick={() => handleOpenEditEmployeeModal(emp)}
-                                  className="inline-flex items-center justify-center w-[76px] px-2.5 py-1 text-xs font-semibold border border-border-subtle text-on-surface rounded-lg hover:bg-surface-container transition-colors cursor-pointer"
-                                >
-                                  Edit
-                                </button>
-                                <button
-                                  onClick={() => {
-                                    if (confirm(`Are you sure you want to delete employee ${emp.first_name} ${emp.last_name}?`)) {
-                                      deleteEmployeeMutation.mutate(emp.id);
-                                    }
-                                  }}
-                                  className="inline-flex items-center justify-center w-[76px] px-2.5 py-1 text-xs font-semibold border border-danger/20 text-danger rounded-lg hover:bg-danger/5 transition-colors cursor-pointer"
-                                >
-                                  Delete
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })
-                    ) : (
-                      <tr>
-                        <td colSpan={6} className="p-xl text-center text-on-surface-variant">No employees registered.</td>
-                      </tr>
-                    )}
-                  </tbody>
+                              </td>
+                              <td className="p-lg">
+                                <span className={isLabourCardExpired ? 'text-danger font-bold' : ''}>
+                                  {derivedLabourCardExpiry ? new Date(derivedLabourCardExpiry).toLocaleDateString() : 'N/A'}
+                                </span>
+                              </td>
+                              <td className="p-lg">
+                                <span className={isPassportExpired ? 'text-danger font-bold' : ''}>
+                                  {derivedPassportExpiry ? new Date(derivedPassportExpiry).toLocaleDateString() : 'N/A'}
+                                </span>
+                              </td>
+                              <td className="p-lg text-center">
+                                <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase ${emp.status === 'active' ? 'bg-success/10 text-success' : 'bg-danger/10 text-danger'
+                                  }`}>
+                                  <span className={`w-1 h-1 rounded-full ${emp.status === 'active' ? 'bg-success' : 'bg-danger'}`}></span>
+                                  {emp.status}
+                                </span>
+                              </td>
+                              <td className="p-lg text-right whitespace-nowrap">
+                                <div className="flex items-center justify-end gap-2">
+                                  <button
+                                    onClick={() => setManagedEmployee(emp)}
+                                    className="inline-flex items-center justify-center w-[106px] px-2.5 py-1 text-xs font-semibold border border-border-subtle text-primary rounded-lg hover:bg-primary/5 transition-colors cursor-pointer"
+                                  >
+                                    Manage Docs
+                                  </button>
+                                  <button
+                                    onClick={() => handleOpenEditEmployeeModal(emp)}
+                                    className="inline-flex items-center justify-center w-[76px] px-2.5 py-1 text-xs font-semibold border border-border-subtle text-on-surface rounded-lg hover:bg-surface-container transition-colors cursor-pointer"
+                                  >
+                                    Edit
+                                  </button>
+                                  <button
+                                    onClick={() => {
+                                      if (confirm(`Are you sure you want to delete employee ${emp.first_name} ${emp.last_name}?`)) {
+                                        deleteEmployeeMutation.mutate(emp.id);
+                                      }
+                                    }}
+                                    className="inline-flex items-center justify-center w-[76px] px-2.5 py-1 text-xs font-semibold border border-danger/20 text-danger rounded-lg hover:bg-danger/5 transition-colors cursor-pointer"
+                                  >
+                                    Delete
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      ) : (
+                        <tr>
+                          <td colSpan={7} className="p-xl text-center text-on-surface-variant">No employees registered.</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  )}
                 </table>
               </div>
             </div>
@@ -3211,3 +3640,174 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
     </AdminLayout>
   );
 }
+
+const DraggableDocRow = ({ doc, index, moveRow }: { doc: any, index: number, moveRow: (dragIndex: number, hoverIndex: number) => void }) => {
+  const ref = React.useRef<HTMLTableRowElement>(null);
+  const [{ isDragging }, drag] = useDrag({
+    type: 'DOCUMENT_ROW',
+    item: { id: doc.id, index },
+    collect: (monitor) => ({ isDragging: monitor.isDragging() }),
+  });
+  const [, drop] = useDrop({
+    accept: 'DOCUMENT_ROW',
+    hover(item: { id: string, index: number }, monitor) {
+      if (!ref.current) return;
+      const dragIndex = item.index;
+      const hoverIndex = index;
+      if (dragIndex === hoverIndex) return;
+      
+      moveRow(dragIndex, hoverIndex);
+      item.index = hoverIndex;
+    },
+  });
+  drag(drop(ref));
+
+  const isExpired = doc.expiry_date && new Date(doc.expiry_date) < new Date();
+  const isSoon = doc.expiry_date && !isExpired && new Date(doc.expiry_date) < new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+
+  return (
+    <tr ref={ref} style={{ opacity: isDragging ? 0.5 : 1, cursor: 'move' }} className="hover:bg-surface-container-lowest transition-colors">
+      <td className="p-lg font-bold flex items-center gap-2">
+        <span className="material-symbols-outlined text-on-surface-variant text-base">drag_handle</span>
+        {doc.file_name}
+      </td>
+      <td className="p-lg text-on-surface-variant font-medium">
+        {doc.document_categories?.name || 'Other'}
+      </td>
+      <td className="p-lg text-on-surface-variant">{(doc.size_bytes / (1024 * 1024)).toFixed(2)} MB</td>
+      <td className="p-lg">
+        <div className="flex flex-col text-xs text-on-surface-variant font-medium">
+          <span>Issue: {doc.issue_date ? new Date(doc.issue_date).toLocaleDateString() : 'N/A'}</span>
+          <span className={isExpired ? 'text-danger font-bold' : isSoon ? 'text-warning font-bold' : ''}>
+            Expiry: {doc.expiry_date ? new Date(doc.expiry_date).toLocaleDateString() : 'No Expiry'}
+          </span>
+        </div>
+      </td>
+      <td className="p-lg">
+        <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase ${isExpired ? 'bg-danger/10 text-danger' : isSoon ? 'bg-warning/10 text-warning' : 'bg-success/10 text-success'}`}>
+          <span className={`w-1 h-1 rounded-full ${isExpired ? 'bg-danger' : isSoon ? 'bg-warning' : 'bg-success'}`}></span>
+          {isExpired ? 'Expired' : isSoon ? 'Expiring Soon' : 'Active'}
+        </span>
+      </td>
+      <td className="p-lg text-right whitespace-nowrap">
+        {/* Actions can be added here if needed in drag mode */}
+      </td>
+    </tr>
+  );
+};
+
+const DraggableEmpRow = ({ emp, index, moveRow, employeeCompanyDocs, setManagedEmployee, handleOpenEditEmployeeModal, deleteEmployeeMutation }: {
+  emp: any,
+  index: number,
+  moveRow: (dragIndex: number, hoverIndex: number) => void,
+  employeeCompanyDocs: any[] | undefined,
+  setManagedEmployee: (emp: any) => void,
+  handleOpenEditEmployeeModal: (emp: any) => void,
+  deleteEmployeeMutation: any
+}) => {
+  const ref = React.useRef<HTMLTableRowElement>(null);
+
+  const [{ isDragging }, drag] = useDrag({
+    type: 'EMPLOYEE_ROW',
+    item: { id: emp.id, index },
+    collect: (monitor) => ({ isDragging: monitor.isDragging() }),
+  });
+  const [, drop] = useDrop({
+    accept: 'EMPLOYEE_ROW',
+    hover(item: { id: string, index: number }, monitor) {
+      if (!ref.current) return;
+      const dragIndex = item.index;
+      const hoverIndex = index;
+      if (dragIndex === hoverIndex) return;
+      
+      const hoverBoundingRect = ref.current?.getBoundingClientRect();
+      const hoverMiddleY = (hoverBoundingRect.bottom - hoverBoundingRect.top) / 2;
+      const clientOffset = monitor.getClientOffset();
+      const hoverClientY = clientOffset!.y - hoverBoundingRect.top;
+      
+      if (dragIndex < hoverIndex && hoverClientY < hoverMiddleY) return;
+      if (dragIndex > hoverIndex && hoverClientY > hoverMiddleY) return;
+      
+      moveRow(dragIndex, hoverIndex);
+      item.index = hoverIndex;
+    },
+  });
+  drag(drop(ref));
+
+  const empDocs = employeeCompanyDocs?.filter((d: any) => d.employee_id === emp.id) || [];
+  const visaDoc = empDocs.find((d: any) => d.document_categories?.name?.toLowerCase().includes('visa'));
+  const passportDoc = empDocs.find((d: any) => d.document_categories?.name?.toLowerCase().includes('passport'));
+  const labourDoc = empDocs.find((d: any) => d.document_categories?.name?.toLowerCase().includes('labour card'));
+
+  const derivedVisaExpiry = visaDoc?.expiry_date || emp.visa_expiry || null;
+  const derivedPassportExpiry = passportDoc?.expiry_date || emp.passport_expiry || null;
+  const derivedLabourCardExpiry = labourDoc?.expiry_date || emp.labor_card_expiry || null;
+
+  const isVisaExpired = derivedVisaExpiry && new Date(derivedVisaExpiry) < new Date();
+  const isPassportExpired = derivedPassportExpiry && new Date(derivedPassportExpiry) < new Date();
+  const isLabourCardExpired = derivedLabourCardExpiry && new Date(derivedLabourCardExpiry) < new Date();
+
+  const hasExpiredDoc = empDocs.some((d: any) => d.expiry_date && new Date(d.expiry_date) < new Date());
+
+  return (
+    <tr ref={ref} style={{ opacity: isDragging ? 0.5 : 1, cursor: 'move' }} className="hover:bg-surface-container-lowest transition-colors">
+      <td className="p-lg font-bold">
+        <div className="flex items-center gap-2">
+          <span className="material-symbols-outlined text-on-surface-variant text-base">drag_handle</span>
+          <span>{emp.first_name} {emp.last_name}</span>
+          {hasExpiredDoc && (
+            <span className="ml-2 w-2.5 h-2.5 bg-danger rounded-full inline-block" title="This employee has one or more expired documents."></span>
+          )}
+        </div>
+      </td>
+      <td className="p-lg text-on-surface-variant font-medium">{emp.designation}</td>
+      <td className="p-lg">
+        <span className={isVisaExpired ? 'text-danger font-bold' : ''}>
+          {derivedVisaExpiry ? new Date(derivedVisaExpiry).toLocaleDateString() : 'N/A'}
+        </span>
+      </td>
+      <td className="p-lg">
+        <span className={isLabourCardExpired ? 'text-danger font-bold' : ''}>
+          {derivedLabourCardExpiry ? new Date(derivedLabourCardExpiry).toLocaleDateString() : 'N/A'}
+        </span>
+      </td>
+      <td className="p-lg">
+        <span className={isPassportExpired ? 'text-danger font-bold' : ''}>
+          {derivedPassportExpiry ? new Date(derivedPassportExpiry).toLocaleDateString() : 'N/A'}
+        </span>
+      </td>
+      <td className="p-lg text-center">
+        <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase ${emp.status === 'active' ? 'bg-success/10 text-success' : 'bg-danger/10 text-danger'}`}>
+          <span className={`w-1 h-1 rounded-full ${emp.status === 'active' ? 'bg-success' : 'bg-danger'}`}></span>
+          {emp.status}
+        </span>
+      </td>
+      <td className="p-lg text-right whitespace-nowrap">
+        <div className="flex items-center justify-end gap-2">
+          <button
+            onClick={() => setManagedEmployee(emp)}
+            className="inline-flex items-center justify-center w-[106px] px-2.5 py-1 text-xs font-semibold border border-border-subtle text-primary rounded-lg hover:bg-primary/5 transition-colors cursor-pointer"
+          >
+            Manage Docs
+          </button>
+          <button
+            onClick={() => handleOpenEditEmployeeModal(emp)}
+            className="inline-flex items-center justify-center w-[76px] px-2.5 py-1 text-xs font-semibold border border-border-subtle text-on-surface rounded-lg hover:bg-surface-container transition-colors cursor-pointer"
+          >
+            Edit
+          </button>
+          <button
+            onClick={() => {
+              if (confirm(`Are you sure you want to delete employee ${emp.first_name} ${emp.last_name}?`)) {
+                deleteEmployeeMutation.mutate(emp.id);
+              }
+            }}
+            className="inline-flex items-center justify-center w-[76px] px-2.5 py-1 text-xs font-semibold border border-danger/20 text-danger rounded-lg hover:bg-danger/5 transition-colors cursor-pointer"
+          >
+            Delete
+          </button>
+        </div>
+      </td>
+    </tr>
+  );
+};
