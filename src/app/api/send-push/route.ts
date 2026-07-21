@@ -199,15 +199,22 @@ export async function POST(request: NextRequest) {
     console.time(`[NOTIFICATION_FLOW] FCM batch for ${notification_id}`);
 
     for (const token of uniqueTokens) {
-      // ⚠️ DATA-ONLY payload: No `notification` block.
-      // Including a `notification` block causes FCM to auto-display the notification
-      // on Android, which then ALSO triggers the local notification from the background
-      // handler — resulting in DOUBLE notifications.
-      // With data-only, FCM delivers silently in background/killed state and only
-      // the background handler (or foreground listener) shows one local notification.
+      // FCM payload includes BOTH `notification` AND `data` blocks.
+      //
+      // Why both? When the app is killed, Android's FCM service auto-displays
+      // the `notification` block as a system notification (this is the ONLY way
+      // to reliably show notifications on a killed app).
+      //
+      // The background handler (main.dart) checks for the `notification` block:
+      // if present, it SKIPS showing a local notification to avoid double display.
+      // If absent (data-only), it falls back to showing a local notification.
       const payload = {
         message: {
           token,
+          notification: {
+            title: title ?? 'PRO Services',
+            body: message ?? '',
+          },
           data: {
             notification_id: notification_id,
             company_id: company_id ?? '',
@@ -217,6 +224,10 @@ export async function POST(request: NextRequest) {
           },
           android: {
             priority: 'high' as const,
+            notification: {
+              channel_id: 'pro_services_channel',
+              sound: 'default',
+            },
           },
         },
       };
