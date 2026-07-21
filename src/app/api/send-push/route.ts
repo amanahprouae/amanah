@@ -117,7 +117,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ sent: 0, reason: 'no_tokens' });
     }
 
-    console.log(`[send-push] Processing notification ${notification_id} for ${users.length} users`);
+    console.log(`[NOTIFICATION_FLOW] 🔍 Backend processing notification ${notification_id} for ${users.length} users`);
 
     // Group tokens by user_id to ensure one notification per user
     const userTokensMap = new Map<string, string[]>();
@@ -137,15 +137,16 @@ export async function POST(request: NextRequest) {
 
     // Log token deduplication results
     const totalTokensBeforeDedup = Array.from(userTokensMap.values()).reduce((sum, tokens) => sum + tokens.length, 0);
-    console.log(`[send-push] Token deduplication: ${totalTokensBeforeDedup} tokens → ${tokens.length} unique users`);
+    console.log(`[NOTIFICATION_FLOW] 🧹 Token deduplication: ${totalTokensBeforeDedup} tokens → ${tokens.length} unique users`);
 
     // Additional deduplication: remove duplicate tokens (same token for different users)
     const uniqueTokens = [...new Set(tokens)];
     if (uniqueTokens.length < tokens.length) {
-      console.log(`[send-push] Removed ${tokens.length - uniqueTokens.length} duplicate tokens`);
+      console.log(`[NOTIFICATION_FLOW] 🗑️  Removed ${tokens.length - uniqueTokens.length} duplicate tokens`);
     }
 
     if (uniqueTokens.length === 0) {
+      console.log(`[NOTIFICATION_FLOW] ⚠️  No valid tokens found`);
       return NextResponse.json({ sent: 0, reason: 'no_tokens' });
     }
 
@@ -176,7 +177,8 @@ export async function POST(request: NextRequest) {
     let failed = 0;
     const errors: string[] = [];
 
-    console.log(`[send-push] Sending to ${uniqueTokens.length} unique devices`);
+    console.log(`[NOTIFICATION_FLOW] 📤 Sending to ${uniqueTokens.length} unique devices`);
+    console.time(`[NOTIFICATION_FLOW] FCM batch for ${notification_id}`);
 
     for (const token of uniqueTokens) {
       const payload = {
@@ -213,10 +215,11 @@ export async function POST(request: NextRequest) {
 
         if (res.ok) {
           sent++;
+          console.log(`[NOTIFICATION_FLOW] ✅ FCM success for token ${token.slice(0, 16)}...`);
         } else {
           const errBody = await res.text();
           const errMsg = `FCM error for token ${token.slice(0, 16)}...: ${errBody}`;
-          console.error(`[send-push] ${errMsg}`);
+          console.error(`[NOTIFICATION_FLOW] ❌ ${errMsg}`);
           errors.push(errMsg);
           failed++;
         }
@@ -227,6 +230,9 @@ export async function POST(request: NextRequest) {
         failed++;
       }
     }
+    
+    console.timeEnd(`[NOTIFICATION_FLOW] FCM batch for ${notification_id}`);
+    console.log(`[NOTIFICATION_FLOW] 📊 FCM completed: ${sent} sent, ${failed} failed, ${uniqueTokens.length} total`);
 
     // Record successful delivery to prevent duplicates
     try {

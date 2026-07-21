@@ -80,7 +80,8 @@ export default function NotificationsConfigPage() {
       // 2. Send FCM push with comprehensive error handling and duplicate prevention
       if (notificationId) {
         try {
-          console.log(`[Notification] Starting push for notification ${notificationId}`);
+          console.log(`[NOTIFICATION_FLOW] 📧 Calling API for notification ${notificationId}`);
+          console.time(`[NOTIFICATION_FLOW] API call for ${notificationId}`);
           
           const response = await fetch('/api/send-push', {
             method: 'POST',
@@ -94,17 +95,18 @@ export default function NotificationsConfigPage() {
           });
           
           const responseData = await response.json();
+          console.timeEnd(`[NOTIFICATION_FLOW] API call for ${notificationId}`);
           
           if (!response.ok) {
-            console.error('Push send error:', responseData);
+            console.error('[NOTIFICATION_FLOW] ❌ API Error:', responseData);
             // If it's a duplicate, log it but don't throw
             if (responseData.reason === 'already_processed' || responseData.reason === 'recent_duplicate') {
-              console.log(`[Notification] ✅ Duplicate prevented: ${responseData.message}`);
+              console.log(`[NOTIFICATION_FLOW] ✅ Duplicate prevented: ${responseData.message}`);
             } else {
               throw new Error(responseData.error || 'Unknown push error');
             }
           } else {
-            console.log(`[Notification] ✅ Successfully sent to ${responseData.users || responseData.total} users`);
+            console.log(`[NOTIFICATION_FLOW] ✅ API Success: ${responseData.users || responseData.total} users, ${responseData.sent || 0} sent`);
           }
         } catch (e) {
           console.error('[Notification] ❌ Push send error:', e);
@@ -134,12 +136,17 @@ export default function NotificationsConfigPage() {
   // Client-side duplicate prevention - prevent rapid successive submissions
   const onSubmit = (data: NotifyFields) => {
     const now = Date.now();
+    console.log(`[NOTIFICATION_FLOW] Button clicked at ${new Date(now).toISOString()}`);
+    
     if (lastNotificationTime && (now - lastNotificationTime) < 10000) { // 10 second cooldown
+      const secondsSinceLast = (now - lastNotificationTime) / 1000;
+      console.log(`[NOTIFICATION_FLOW] ❌ Duplicate click prevented - ${secondsSinceLast.toFixed(1)}s since last attempt`);
       alert('Please wait a few seconds before sending another notification to prevent duplicates.');
       return;
     }
     
     setLastNotificationTime(now);
+    console.log(`[NOTIFICATION_FLOW] ✅ Proceeding with notification send`);
     addNotifyMutation.mutate(data);
   };
 
