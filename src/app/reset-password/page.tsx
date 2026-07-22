@@ -283,7 +283,7 @@ export default function ResetPasswordPage() {
         </div>
 
         <p className="text-center text-sm text-[#8a8a80] mt-6">
-          © 2024 Amanah. All rights reserved.
+          © 2026 Amanah. All rights reserved.
         </p>
       </div>
     </div>
