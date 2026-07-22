@@ -41,7 +41,7 @@ const companyEditSchema = zod.object({
   }).optional(),
   trade_license_expiry: zod.string().optional(),
   vat_number: zod.string().or(zod.string().length(0)).optional(),
-  subscription_plan: zod.string().or(zod.string().length(0)).optional(),
+  cid: zod.string().or(zod.string().length(0)).optional(),
   assigned_pro: zod.string().or(zod.string().length(0)).optional(),
   email: zod.string().email({ message: 'Invalid email address' }).or(zod.string().length(0)).optional(),
   phone: zod.string().or(zod.string().length(0)).optional(),
@@ -177,7 +177,7 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
           trade_license_issue: (isCorporate && fields.trade_license_issue) ? fields.trade_license_issue : null,
           trade_license_expiry: isCorporate ? fields.trade_license_expiry : null,
           vat_number: fields.vat_number || null,
-          subscription_plan: fields.subscription_plan || null,
+          cid: fields.cid ? `CID${fields.cid}` : null,
           assigned_pro: fields.assigned_pro || null,
           email: fields.email || null,
           phone: fields.phone || null,
@@ -216,7 +216,7 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
         trade_license_issue: company.trade_license_issue || '',
         trade_license_expiry: company.trade_license_expiry || '',
         vat_number: company.vat_number || '',
-        subscription_plan: company.subscription_plan || 'Standard',
+        cid: company.cid?.startsWith('CID') ? company.cid.slice(3) : (company.cid || ''),
         assigned_pro: company.assigned_pro || '',
         email: company.email || '',
         phone: company.phone || '',
@@ -1709,23 +1709,11 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
                     </>
                   )}
                   <div>
-                    <p className="text-[10px] uppercase font-bold tracking-wider text-on-surface-variant mb-1">Subscription Plan</p>
-                    {company.subscription_plan === 'Premium Gold' ? (
-                      <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-500/10 text-amber-600 font-bold text-xs">
-                        <span className="material-symbols-outlined text-sm">workspace_premium</span>
-                        <span>Premium Gold</span>
-                      </span>
-                    ) : company.subscription_plan === 'Premium Silver' ? (
-                      <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-400/15 text-slate-600 font-bold text-xs">
-                        <span className="material-symbols-outlined text-sm">workspace_premium</span>
-                        <span>Premium Silver</span>
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-secondary-container text-on-secondary-container font-bold text-xs">
-                        <span className="material-symbols-outlined text-sm">workspace_premium</span>
-                        <span>{company.subscription_plan || 'Standard'}</span>
-                      </span>
-                    )}
+                    <p className="text-[10px] uppercase font-bold tracking-wider text-on-surface-variant mb-1">Customer ID (CID)</p>
+                    <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-secondary-container text-on-secondary-container font-bold text-xs">
+                      <span className="material-symbols-outlined text-sm">badge</span>
+                      <span>{company.cid || 'N/A'}</span>
+                    </span>
                   </div>
                   <div>
                     <p className="text-[10px] uppercase font-bold tracking-wider text-on-surface-variant mb-1">Assigned PRO</p>
@@ -2571,15 +2559,19 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
               )}
 
               <div>
-                <label className="block text-label-md text-on-surface-variant mb-1">Subscription Plan</label>
-                <select
-                  className="w-full px-4 py-2 border border-border-subtle rounded-lg text-sm bg-white focus:outline-primary"
-                  {...registerCompany('subscription_plan')}
-                >
-                  <option value="Standard">Standard</option>
-                  <option value="Premium Silver">Premium Silver</option>
-                  <option value="Premium Gold">Premium Gold</option>
-                </select>
+                <label className="block text-label-md text-on-surface-variant mb-1">Customer ID (CID)</label>
+                <div className="flex items-center gap-2">
+                  <span className="px-3 py-2 border border-border-subtle rounded-lg text-sm bg-surface-container-low text-on-surface-variant font-bold select-none">
+                    CID
+                  </span>
+                  <input
+                    type="text"
+                    placeholder="Enter numeric ID"
+                    className="flex-1 px-4 py-2 border border-border-subtle rounded-lg text-sm focus:outline-primary"
+                    {...registerCompany('cid')}
+                  />
+                </div>
+                <p className="mt-1 text-[10px] text-on-surface-variant">The prefix <strong>CID</strong> is fixed. Enter only the numeric part.</p>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-sm">
