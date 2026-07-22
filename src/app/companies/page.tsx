@@ -18,6 +18,7 @@ const companySchema = zod.object({
     message: 'Valid issue date is required',
   }).optional(),
   trade_license_expiry: zod.string().optional(),
+  cid: zod.string().or(zod.string().length(0)).optional(),
   logo_url: zod.string().url().or(zod.string().length(0)).optional(),
   email: zod.string().email({ message: 'Invalid email address' }).or(zod.string().length(0)).optional(),
   phone: zod.string().or(zod.string().length(0)).optional(),
@@ -120,6 +121,20 @@ export default function CompaniesPage() {
           .getPublicUrl(fileName).data.publicUrl;
       }
 
+      // Check for duplicate CID before creating
+      const newCid = newData.cid ? `CID${newData.cid}` : null;
+      if (newCid) {
+        const { data: existing, error: dupError } = await supabase
+          .from('companies')
+          .select('id, name')
+          .eq('cid', newCid)
+          .maybeSingle();
+        if (dupError) throw dupError;
+        if (existing) {
+          throw new Error(`CID "${newCid}" is already assigned to "${existing.name}". Each entity must have a unique Customer ID.`);
+        }
+      }
+
       const { data, error } = await supabase
         .from('companies')
         .insert([
@@ -129,7 +144,8 @@ export default function CompaniesPage() {
             trade_license_number: isCorporate ? newData.trade_license_number : null,
             trade_license_issue: (isCorporate && newData.trade_license_issue) ? newData.trade_license_issue : null,
             trade_license_expiry: isCorporate ? newData.trade_license_expiry : null,
-            logo_url: newData.logo_url || null,
+            cid: newCid,
+            logo_url: logoUrl,
             status: 'active',
             email: newData.email || null,
             phone: newData.phone || null,
@@ -269,6 +285,7 @@ export default function CompaniesPage() {
               <thead>
                 <tr className="bg-bg-subtle border-b border-border-subtle text-label-sm text-on-surface-variant font-bold">
                   <th className="p-lg">Name</th>
+                  <th className="p-lg">CID</th>
                   <th className="p-lg">Trade License / ID</th>
                   <th className="p-lg">Expiry Date</th>
                   <th className="p-lg text-center">Active Members</th>
@@ -280,19 +297,19 @@ export default function CompaniesPage() {
               <tbody className="divide-y divide-border-subtle font-body-sm text-on-surface">
                 {isLoading ? (
                   <tr>
-                    <td colSpan={7} className="p-xl text-center text-on-surface-variant">
-                      <div className="flex justify-center items-center gap-2">
-                        <span className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent"></span>
-                        <span>Loading entities...</span>
-                      </div>
-                    </td>
-                  </tr>
+                      <td colSpan={8} className="p-xl text-center text-on-surface-variant">
+                        <div className="flex justify-center items-center gap-2">
+                          <span className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent"></span>
+                          <span>Loading entities...</span>
+                        </div>
+                      </td>
+                    </tr>
                 ) : filteredCompanies.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="p-xl text-center text-on-surface-variant">
-                      No records found.
-                    </td>
-                  </tr>
+                      <td colSpan={8} className="p-xl text-center text-on-surface-variant">
+                        No records found.
+                      </td>
+                    </tr>
                 ) : (
                   filteredCompanies.map((company) => {
                     const activeEmployees = (company.employees || []).filter((e: any) => e.status === 'active').length;
@@ -326,6 +343,16 @@ export default function CompaniesPage() {
                               )}
                             </div>
                           </div>
+                        </td>
+                        <td className="p-lg">
+                          {company.cid ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-secondary-container text-on-secondary-container font-bold text-xs">
+                              <span className="material-symbols-outlined text-[11px]">badge</span>
+                              {company.cid}
+                            </span>
+                          ) : (
+                            <span className="text-on-surface-variant text-xs">—</span>
+                          )}
                         </td>
                         <td className="p-lg font-mono text-on-surface-variant">
                           {company.trade_license_number || 'N/A'}
@@ -498,6 +525,25 @@ export default function CompaniesPage() {
                       }}
                     />
                   </div>
+                </div>
+
+                <div>
+                  <label className="block text-label-md text-on-surface-variant mb-2">Customer ID (CID) (Optional)</label>
+                  <div className="flex gap-2">
+                    <span className="inline-flex items-center justify-center px-3 py-2 border border-border-subtle rounded-l-lg bg-bg-subtle text-body-sm font-semibold">
+                      CID
+                    </span>
+                    <input
+                      type="text"
+                      className={`flex-1 px-4 py-2 border rounded-r-lg focus:ring-2 focus:ring-primary ${
+                        errors.cid ? 'border-danger focus:ring-danger' : 'border-border-subtle'
+                      }`}
+                      placeholder="12345"
+                      {...register('cid')}
+                    />
+                  </div>
+                  {errors.cid && <p className="mt-1 text-danger text-[11px] font-semibold">{errors.cid.message}</p>}
+                  <p className="mt-1 text-[11px] text-on-surface-variant">The prefix <strong>CID</strong> is fixed. Enter only the numeric part.</p>
                 </div>
 
                 <div>

@@ -168,6 +168,21 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
           .getPublicUrl(fileName).data.publicUrl;
       }
 
+      // Check for duplicate CID before saving (exclude current company)
+      const newCid = fields.cid ? `CID${fields.cid}` : null;
+      if (newCid) {
+        const { data: existing, error: dupError } = await supabase
+          .from('companies')
+          .select('id, name')
+          .eq('cid', newCid)
+          .neq('id', companyId)
+          .maybeSingle();
+        if (dupError) throw dupError;
+        if (existing) {
+          throw new Error(`CID "${newCid}" is already assigned to "${existing.name}". Each entity must have a unique Customer ID.`);
+        }
+      }
+
       const { data, error } = await supabase
         .from('companies')
         .update({
@@ -177,7 +192,7 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
           trade_license_issue: (isCorporate && fields.trade_license_issue) ? fields.trade_license_issue : null,
           trade_license_expiry: isCorporate ? fields.trade_license_expiry : null,
           vat_number: fields.vat_number || null,
-          cid: fields.cid ? `CID${fields.cid}` : null,
+          cid: newCid,
           assigned_pro: fields.assigned_pro || null,
           email: fields.email || null,
           phone: fields.phone || null,
@@ -187,7 +202,13 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
         .eq('id', companyId)
         .select()
         .single();
-      if (error) throw error;
+      if (error) {
+        // Surface the Postgres unique-violation as a friendly message
+        if (error.code === '23505') {
+          throw new Error(`This CID is already in use by another entity. Please enter a different Customer ID.`);
+        }
+        throw error;
+      }
 
       // Log activity
       await supabase.from('activity_logs').insert([
@@ -2651,6 +2672,12 @@ export default function CompanyDetailPage({ params }: { params: Promise<{ id: st
               </div>
 
               <div className="flex gap-sm justify-end pt-4 border-t border-border-subtle">
+                {updateCompanyMutation.isError && (
+                  <p className="flex-1 text-danger text-xs font-semibold flex items-center gap-1">
+                    <span className="material-symbols-outlined text-sm">error</span>
+                    {(updateCompanyMutation.error as Error)?.message || 'Failed to save changes.'}
+                  </p>
+                )}
                 <button
                   type="button"
                   onClick={() => {
